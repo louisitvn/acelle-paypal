@@ -1,0 +1,20 @@
+{
+    "name": "acelle/paypal",
+    "title": "Just to say hello world",
+    "version": "1.0.0",
+    "app_version": "4.0.24",
+    "description": "A sample plugin namely 'paypal' made by 'acelle' team",
+    "autoload": {
+        "psr-4": {
+            "Acelle\\Paypal\\": "src/"
+        }
+    },
+    "extra": {
+        "setting-route": "\\Acelle\\Paypal\\Controllers\\DashboardController@index",
+        "laravel": {
+            "providers": [
+                "Acelle\\Paypal\\ServiceProvider"
+            ]
+        }
+    }
+}
