@@ -3,7 +3,9 @@
 namespace Acelle\Paypal;
 
 use Illuminate\Support\ServiceProvider as Base;
+use App\Library\Facades\Billing;
 use App\Library\Facades\Hook;
+use Acelle\Paypal\Services\PayPalGateway;
 
 class ServiceProvider extends Base
 {
@@ -77,6 +79,24 @@ class ServiceProvider extends Base
         // declared in routes.php and serves storage/app/plugins/acelle/paypal/icon.svg
         // directly. Replace icon.svg in the plugin root with your own to brand it.
         Hook::set('icon_url_acelle/paypal', fn () => route('plugin.acelle.paypal.icon'));
+
+        // Self-register as a payment gateway type. Single call covers admin
+        // select-type list (name/description/icon), capability flag (remote
+        // subscription = true since we implement RemoteSubscriptionGateway),
+        // form view path, and factory closure (used by Billing::resolveService).
+        Billing::register(
+            type: 'paypal',
+            name: trans('paypal::messages.gateway.name'),
+            description: trans('paypal::messages.gateway.description'),
+            serviceFactory: fn ($gw) => new PayPalGateway(
+                clientId:     (string) $gw->getGatewayData('client_id'),
+                clientSecret: (string) $gw->getGatewayData('client_secret'),
+                environment:  (string) ($gw->getGatewayData('environment') ?: 'sandbox'),
+            ),
+            icon: 'payments',
+            isRemoteSubscription: true,
+            formView: 'paypal::form',
+        );
 
         // Rollback plugin migrations when the plugin is deleted
         Hook::on('delete_plugin_acelle/paypal', function () {

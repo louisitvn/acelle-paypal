@@ -1,16 +1,15 @@
 {
     "name": "acelle/paypal",
-    "title": "Just to say hello world",
+    "title": "PayPal Payment Gateway",
     "version": "1.0.0",
     "app_version": "4.0.24",
-    "description": "A sample plugin namely 'paypal' made by 'acelle' team",
+    "description": "Accept one-off payments and manage recurring subscriptions through PayPal (Orders v2 + Billing Subscriptions v1).",
     "autoload": {
         "psr-4": {
             "Acelle\\Paypal\\": "src/"
         }
     },
     "extra": {
-        "setting-route": "\\Acelle\\Paypal\\Controllers\\DashboardController@index",
         "laravel": {
             "providers": [
                 "Acelle\\Paypal\\ServiceProvider"

@@ -15,7 +15,21 @@ Route::get('plugins/acelle/paypal/icon.svg', function () {
     ]);
 })->name('plugin.acelle.paypal.icon');
 
-// Client View Groups
-Route::group(['middleware' => ['web'], 'namespace' => '\Acelle\Paypal\Controllers'], function () {
-    Route::get('plugins/acelle/paypal', 'DashboardController@index');
+// Payment-gateway routes. Two customer-facing endpoints:
+//   - paypal.checkout — entry from app's payment flow; calls Orders v2 (one-off)
+//     or Subscriptions v1 (subscription), then 302s to PayPal's approve URL
+//   - paypal.return   — PayPal redirects browser here after approve/cancel;
+//     branches on ?subscription_id, ?token, or ?cancel=1
+//
+// No webhook route — pull-only design. RemoteSubscriptionSyncService polls
+// state for recurring renewals; one-off completion is committed inline at
+// return time via Orders/Capture call.
+Route::group(['middleware' => ['web']], function () {
+    Route::get('/cashier/paypal/checkout/{intent_uid}',
+        [\Acelle\Paypal\Controllers\PayPalCheckoutController::class, 'redirect'])
+        ->name('paypal.checkout');
+
+    Route::get('/cashier/paypal/return/{intent_uid}',
+        [\Acelle\Paypal\Controllers\PayPalReturnController::class, 'handle'])
+        ->name('paypal.return');
 });
