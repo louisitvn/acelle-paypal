@@ -51,12 +51,23 @@ class PayPalApi
 
     public function post(string $path, array $body): array
     {
-        return $this->request('POST', $path, ['json' => $body]);
+        return $this->request('POST', $path, ['json' => self::jsonBody($body)]);
     }
 
     public function patch(string $path, array $body): array
     {
-        return $this->request('PATCH', $path, ['json' => $body]);
+        return $this->request('PATCH', $path, ['json' => self::jsonBody($body)]);
+    }
+
+    /**
+     * PayPal endpoints reject "[]" as malformed JSON when the body is meaningfully
+     * empty (e.g. capture order, activate plan — both accept empty bodies but
+     * expect "{}" not "[]"). PHP arrays with no keys serialize to "[]" — wrap
+     * in stdClass so json_encode emits "{}". Keyed arrays pass through unchanged.
+     */
+    private static function jsonBody(array $body): array|\stdClass
+    {
+        return empty($body) ? new \stdClass() : $body;
     }
 
     // ─────────────────────────────────────────────────────────────────────

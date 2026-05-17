@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>PayPal Payment Gateway for Acelle Mail — User Guide</title>
+<title>PayPal for Acelle Mail — User Guide</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root {
@@ -183,17 +183,22 @@ img {
 </head>
 <body>
 <main class="container">
-<h1 id="paypal-payment-gateway-for-acelle-mail-user-guide">PayPal Payment Gateway for Acelle Mail — User Guide</h1>
-<p>A drop-in plugin that adds <strong>PayPal</strong> (paypal.com) as a payment gateway in Acelle. Customers can pay with their existing PayPal balance, credit card, or local payment method through PayPal&#39;s hosted checkout. Supports both <strong>one-off charges</strong> (PayPal Orders v2) and <strong>recurring subscriptions</strong> (PayPal Billing Subscriptions v1) — and like Paddle, the integration is <strong>pull-only</strong>: no public webhook endpoint to host.</p>
+<h1 id="paypal-for-acelle-mail-user-guide">PayPal for Acelle Mail — User Guide</h1>
+<p>A drop-in plugin that adds <strong>PayPal</strong> (paypal.com) to Acelle as <strong>two payment gateways shipped together</strong>:</p>
+<ul>
+<li><strong>PayPal</strong> — one-off charges via PayPal <strong>Orders v2</strong>. Customer can pay with their PayPal account OR as a guest with debit/credit card (no PayPal account required on the buyer side).</li>
+<li><strong>PayPal Subscription</strong> — recurring billing managed by PayPal via <strong>Subscriptions v1</strong>. Customer approves once; PayPal auto-charges each cycle.</li>
+</ul>
+<p>Both gateways are powered by the same plugin, share the same form (Client ID + Secret + Environment), and use <strong>pull-only sync</strong> — no public webhook endpoint, no IPN configuration. Enable one or both depending on what your customers need.</p>
 <hr>
 <h2 id="table-of-contents">Table of Contents</h2>
 <ol>
 <li><a href="#1-requirements">Requirements</a></li>
 <li><a href="#2-install-the-plugin">Install the plugin</a></li>
 <li><a href="#3-enable-the-plugin">Enable the plugin</a></li>
-<li><a href="#4-add-paypal-as-a-payment-gateway">Add PayPal as a payment gateway</a></li>
+<li><a href="#4-pick-the-gateways-you-need-one-off-subscription-or-both">Pick the gateway(s) you need — one-off, subscription, or both</a></li>
 <li><a href="#5-configure-client-id-secret-environment">Configure Client ID + Secret + Environment</a></li>
-<li><a href="#6-map-your-local-plans-to-paypal-billing-plans">Map your local plans to PayPal Billing Plans</a></li>
+<li><a href="#6-map-your-local-plans-to-paypal-billing-plans-subscription-only">Map your local plans to PayPal Billing Plans (subscription only)</a></li>
 <li><a href="#7-how-customers-pay">How customers pay</a></li>
 <li><a href="#8-subscription-state-sync">Subscription state sync</a></li>
 <li><a href="#9-sandbox-testing">Sandbox testing</a></li>
@@ -223,7 +228,7 @@ img {
 </tr>
 <tr>
 <td><strong>REST API app</strong></td>
-<td>Create one at <a href="https://developer.paypal.com/dashboard/">developer.paypal.com/dashboard</a> → <strong>Apps &amp; Credentials</strong>. The app produces a <strong>Client ID</strong> and <strong>Secret</strong> — the only two credentials this plugin needs.</td>
+<td>Create one at <a href="https://developer.paypal.com/dashboard/">developer.paypal.com/dashboard</a> → <strong>Apps &amp; Credentials</strong>. The app produces a <strong>Client ID</strong> and <strong>Secret</strong> — the only two credentials this plugin needs. The same app works for BOTH gateways.</td>
 </tr>
 <tr>
 <td><strong>Outbound HTTPS</strong></td>
@@ -231,7 +236,7 @@ img {
 </tr>
 <tr>
 <td><strong>Inbound HTTPS</strong></td>
-<td>Your Acelle install must be reachable so customers can be redirected back from PayPal after approve / cancel (<code>/cashier/paypal/return/{intent_uid}</code>)</td>
+<td>Your Acelle install must be reachable so customers can be redirected back from PayPal after approve / cancel (<code>/cashier/paypal/return/{intent_uid}</code> or <code>/cashier/paypal-subscription/return/{intent_uid}</code>)</td>
 </tr>
 </tbody></table>
 <p>You do <strong>not</strong> need:</p>
@@ -251,9 +256,9 @@ img {
 <li>Drop the ZIP into the upload box (or click <strong>Choose File</strong>) and click <strong>Upload &amp; install</strong>.</li>
 </ol>
 <p>The progress dialog runs through three steps — <em>Uploading package → Extracting + writing files → Registering plugin + running install routines</em> — and finishes in 5–30 seconds.</p>
-<p><img src="images/01-install-upload-page.png" alt="Install plugin upload dialog"></p>
+<p><img src="images/paypal-plugin-01-install-upload-page.png" alt="Install plugin upload dialog"></p>
 <p>After install completes, the <strong>Plugins</strong> list reloads and <strong>PayPal Payment Gateway</strong> appears as <strong>Inactive</strong>:</p>
-<p><img src="images/02-plugins-list-paypal-inactive.png" alt="Plugins list with PayPal inactive"></p>
+<p><img src="images/paypal-plugin-02-plugins-list-paypal-inactive.png" alt="Plugins list with PayPal inactive"></p>
 <hr>
 <h2 id="3-enable-the-plugin">3. Enable the plugin</h2>
 <p>Installing only registers the plugin on disk; enable it explicitly so you stay in control of which gateways are available.</p>
@@ -262,32 +267,52 @@ img {
 <li>In the <strong>Plugins</strong> list, find the <strong>PayPal Payment Gateway</strong> card.</li>
 <li>Click the <strong>⋮</strong> (kebab) menu in the card&#39;s top-right and pick <strong>Enable</strong>.</li>
 </ol>
-<p><img src="images/03-paypal-row-closeup.png" alt="PayPal row close-up showing the Inactive state"></p>
-<p>The card flips to <strong>Active</strong>:</p>
-<p><img src="images/04-plugins-list-paypal-active.png" alt="Plugins list with PayPal active"></p>
+<p><img src="images/paypal-plugin-03-paypal-row-closeup.png" alt="PayPal row close-up showing the Inactive state"></p>
+<p>The card flips to <strong>Active</strong> — and <strong>both</strong> PayPal gateways become available in the gateway picker:</p>
+<p><img src="images/paypal-plugin-04-plugins-list-paypal-active.png" alt="Plugins list with PayPal active"></p>
 <blockquote>
-<p><strong>Disable</strong> removes PayPal from the gateway picker for new gateways but keeps existing <code>payment_gateways</code> rows of type <code>paypal</code>. <strong>Delete</strong> also drops every PayPal gateway row — see <a href="#11-uninstall">§11</a>.</p>
+<p><strong>Disable</strong> removes both PayPal gateways from the picker for new gateways but keeps existing <code>payment_gateways</code> rows of type <code>paypal</code> and <code>paypal-subscription</code>. <strong>Delete</strong> rolls back migrations and removes plugin files — see <a href="#11-uninstall">§11</a>.</p>
 </blockquote>
 <hr>
-<h2 id="4-add-paypal-as-a-payment-gateway">4. Add PayPal as a payment gateway</h2>
-<p>Now that the plugin is active, you can register your PayPal app as one of your billing gateways.</p>
+<h2 id="4-pick-the-gateways-you-need-one-off-subscription-or-both">4. Pick the gateway(s) you need — one-off, subscription, or both</h2>
+<p>Now that the plugin is active, both gateway types are available in the <strong>Add Gateway</strong> picker. You can register one of them, or both side by side.</p>
 <p><strong>Steps</strong></p>
 <ol>
 <li>In the admin sidebar, open <strong>Plans &amp; Billing → Payment Gateways</strong>.</li>
 <li>Click <strong>+ Add Gateway</strong> in the top right.</li>
 </ol>
-<p><img src="images/05-payment-gateways-list.png" alt="Payment gateways list — before adding PayPal"></p>
+<p><img src="images/paypal-plugin-05-payment-gateways-list.png" alt="Payment gateways list — before adding PayPal"></p>
 <ol start="3">
-<li>The gateway picker opens. Pick <strong>PayPal</strong> from the <strong>Remote Subscription</strong> group:</li>
+<li>The gateway picker opens. You&#39;ll see <strong>two PayPal entries</strong> — one in each group:</li>
 </ol>
-<p><img src="images/06-select-gateway-type.png" alt="Select gateway type — PayPal under Remote Subscription"></p>
+<p><img src="images/paypal-plugin-06-select-gateway-type.png" alt="Select gateway type — both PayPal options visible"></p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Entry</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Direct Payment</strong></td>
+<td><strong>PayPal</strong></td>
+<td>One-off charges. Customer pays once for the selected plan term. The PayPal hosted checkout also exposes a <strong>guest card payment</strong> option, so buyers without a PayPal account can still pay with their debit/credit card.</td>
+</tr>
+<tr>
+<td><strong>Remote Subscription</strong></td>
+<td><strong>PayPal Subscription</strong></td>
+<td>Recurring billing. Customer approves once at PayPal; PayPal auto-charges each cycle. Requires you to also create matching PayPal Billing Plans (see <a href="#6-map-your-local-plans-to-paypal-billing-plans-subscription-only">§6</a>).</td>
+</tr>
+</tbody></table>
+<p>Pick whichever you need. If you want both, register them separately — each becomes its own row in <strong>Payment Gateways</strong>.</p>
 <blockquote>
-<p>PayPal is in <strong>Remote Subscription</strong> because the subscription lifecycle is owned by PayPal (their Billing Subscriptions API), not Acelle. This is the same group as Paddle and Stripe Subscription. (The &quot;Direct Payment&quot; group above — Offline, Stripe card-token, T-Bank — covers gateways where Acelle owns the subscription record.)</p>
+<p><strong>Why two gateways and not one?</strong> Acelle&#39;s billing layer needs to know at the picker / mapping level whether a gateway hosts recurring subscriptions (Remote Subscription capability) or one-off charges (Direct Payment). PayPal does both but through different APIs (Orders v2 vs Subscriptions v1) — splitting them into two gateway types lets Acelle route customers cleanly and lets you enable only the side you actually need.</p>
 </blockquote>
 <hr>
 <h2 id="5-configure-client-id-secret-environment">5. Configure Client ID + Secret + Environment</h2>
-<p>After picking PayPal, you land on the configuration form.</p>
-<p><img src="images/07-paypal-config-empty.png" alt="Empty PayPal configuration form"></p>
+<p>After picking either gateway, you land on the configuration form. <strong>Both gateways share the same form</strong> — same fields, same validation.</p>
+<p><img src="images/paypal-plugin-07-paypal-config-empty.png" alt="Empty PayPal configuration form"></p>
 <p>Fill in these fields:</p>
 <table>
 <thead>
@@ -298,7 +323,7 @@ img {
 </thead>
 <tbody><tr>
 <td><strong>Gateway Name</strong></td>
-<td>What customers see at checkout (e.g. <code>PayPal</code>, <code>Pay with PayPal</code>)</td>
+<td>What customers see at checkout (e.g. <code>Pay with PayPal</code>, <code>Subscribe via PayPal</code>)</td>
 </tr>
 <tr>
 <td><strong>Description</strong></td>
@@ -317,7 +342,10 @@ img {
 <td><code>Sandbox</code> (developer testing with sandbox accounts and play money) or <code>Live</code> (real funds movement).</td>
 </tr>
 </tbody></table>
-<p><img src="images/08-paypal-config-filled.png" alt="Filled PayPal configuration form"></p>
+<p><img src="images/paypal-plugin-08-paypal-config-filled.png" alt="Filled PayPal configuration form"></p>
+<blockquote>
+<p><strong>Same credentials for both gateways.</strong> The same PayPal REST app produces creds usable for Orders v2 AND Subscriptions v1 — you can paste the same Client ID + Secret into both gateways. There&#39;s no separate &quot;subscription credential&quot; at PayPal.</p>
+</blockquote>
 <blockquote>
 <p><strong>Client ID and Secret are environment-bound.</strong> A Sandbox Client ID will NOT authenticate against the Live API and vice versa. Mixing them is the most common mistake — if PayPal returns <code>Authentication failed</code> after save, double-check the Sandbox/Live toggle in the PayPal dashboard matches the dropdown value here.</p>
 </blockquote>
@@ -326,44 +354,53 @@ img {
 <p><strong>No webhook URL to register.</strong> Once the gateway is saved you&#39;re done — no callback URL to copy into the PayPal dashboard, no <code>webhook_id</code> to paste back, no event subscriptions to configure. State syncs in the other direction (Acelle pulls from PayPal on a schedule — see <a href="#8-subscription-state-sync">§8</a>).</p>
 </blockquote>
 <hr>
-<h2 id="6-map-your-local-plans-to-paypal-billing-plans">6. Map your local plans to PayPal Billing Plans</h2>
-<p>For <strong>one-off charges</strong> (a customer paying upfront for a single subscription term), no mapping is needed — the plugin creates the Order on the fly with the local plan&#39;s price.</p>
-<p>For <strong>recurring subscriptions</strong> (auto-renewal at the end of each term), you must map each local Acelle plan to a <strong>PayPal Billing Plan</strong> (PayPal&#39;s own plan resource).</p>
+<h2 id="6-map-your-local-plans-to-paypal-billing-plans-subscription-only">6. Map your local plans to PayPal Billing Plans (subscription only)</h2>
+<p><strong>This section only applies to the PayPal Subscription gateway.</strong> The one-off <strong>PayPal</strong> gateway needs no plan mapping — it charges the local plan&#39;s price directly.</p>
+<p>For <strong>PayPal Subscription</strong>, you must map each local Acelle plan to a <strong>PayPal Billing Plan</strong> (PayPal&#39;s own plan resource).</p>
 <p><strong>Steps</strong></p>
 <ol>
 <li><strong>Create the PayPal Billing Plan first.</strong> Log in at <a href="https://www.paypal.com">paypal.com</a> → <strong>Pay &amp; Get Paid → Subscriptions → Plans → Create plan</strong>. Pick a product, set the billing cycle (e.g. monthly USD 49.00), save. PayPal gives the plan an id like <code>P-5ML4271244454362WXNWU5NQ</code>.</li>
-<li><strong>Map it in Acelle.</strong> Open your Acelle PayPal gateway → <strong>Plans &amp; Subscriptions → Remote Plan Mapping</strong>. For each local plan you want to offer through PayPal, pick the corresponding <code>P-…</code> plan id from the dropdown (which is fetched live from <code>GET /v1/billing/plans</code> at PayPal).</li>
+<li><strong>Map it in Acelle.</strong> Open your PayPal Subscription gateway in Acelle → <strong>Plans &amp; Subscriptions → Remote Plan Mapping</strong>. For each local plan you want to offer through PayPal Subscription, pick the corresponding <code>P-…</code> plan id from the dropdown (which is fetched live from <code>GET /v1/billing/plans</code> at PayPal).</li>
 <li><strong>Save the mapping.</strong> Acelle now knows that &quot;local plan X = PayPal plan P-…&quot;.</li>
 </ol>
-<p>When a customer subscribes to local plan X, the plugin starts a PayPal subscription against <code>P-…</code> and PayPal handles the recurring billing forever after.</p>
+<p>When a customer subscribes to local plan X via the PayPal Subscription gateway, the plugin starts a PayPal subscription against <code>P-…</code> and PayPal handles the recurring billing forever after.</p>
 <blockquote>
 <p><strong>Why do I have to create plans at PayPal too?</strong> PayPal&#39;s recurring billing requires their resource model: a Product → a Plan → a Subscription. Acelle wraps the Subscription end of that and stores the plan-to-plan mapping, but the Plan resource itself must exist at PayPal because PayPal is the merchant of record for recurring charges.</p>
 </blockquote>
-<hr>
-<h2 id="7-how-customers-pay">7. How customers pay</h2>
-<p>When a customer picks PayPal at checkout, Acelle redirects them through a single plugin route:</p>
-<pre><code>GET /cashier/paypal/checkout/{intent_uid}?return_url=…
-</code></pre>
-<p>The handler:</p>
-<ol>
-<li>Looks up the <code>PaymentIntent</code> and decides the path — one-off or subscription based on the intent type.</li>
-<li><strong>One-off</strong>: calls PayPal&#39;s <code>POST /v2/checkout/orders</code> with the line items + return / cancel URLs.</li>
-<li><strong>Subscription</strong>: calls PayPal&#39;s <code>POST /v1/billing/subscriptions</code> against the mapped Plan id + return / cancel URLs.</li>
-<li>Receives an <code>approve</code> URL back from PayPal.</li>
-<li>Issues a 302 redirect to that hosted-checkout URL.</li>
-</ol>
-<p>The customer pays on PayPal&#39;s hosted page (PayPal handles fraud screening, 2FA, currency conversion, local payment methods) and is sent back to:</p>
-<pre><code>GET /cashier/paypal/return/{intent_uid}?token=…           # one-off approved
-GET /cashier/paypal/return/{intent_uid}?subscription_id=…  # subscription approved
-GET /cashier/paypal/return/{intent_uid}?cancel=1           # customer cancelled
-</code></pre>
-<p>For <strong>one-off</strong>, the return handler calls <code>POST /v2/checkout/orders/{id}/capture</code> inline (commits the money) and flips the <code>PaymentIntent</code> to <code>SUCCEEDED</code>. For <strong>subscription</strong>, the return handler stores the PayPal subscription id and marks the local subscription <code>active</code>; subsequent renewals are detected by the periodic sync (<a href="#8-subscription-state-sync">§8</a>).</p>
 <blockquote>
-<p><strong>There is no headless / in-app checkout.</strong> PayPal requires their hosted approve flow for SCA / 3DS / 2FA. The plugin&#39;s <code>createSubscription</code> headless method ([for plans that want it] e.g. with a stored Vault payment method) is reserved for advanced future use.</p>
+<p><strong>Unmapped local plan + customer subscribes:</strong> the gateway throws <code>no_plan_mapped</code> and the customer sees a polite error. Always map every local plan you offer through PayPal Subscription before enabling it for customers.</p>
 </blockquote>
 <hr>
+<h2 id="7-how-customers-pay">7. How customers pay</h2>
+<p>The two gateways follow slightly different flows because PayPal uses different APIs for one-off vs recurring.</p>
+<h3 id="one-off-paypal-gateway">One-off (PayPal gateway)</h3>
+<pre><code>GET /cashier/paypal/checkout/{intent_uid}?return_url=…
+</code></pre>
+<ol>
+<li>Plugin calls PayPal&#39;s <code>POST /v2/checkout/orders</code> with the line item + return / cancel URLs.</li>
+<li>PayPal returns an <code>approve</code> URL.</li>
+<li>302 to that URL.</li>
+<li>Customer approves at PayPal — either with their PayPal account or as a <strong>guest with credit/debit card</strong> (the option is exposed automatically in PayPal&#39;s hosted checkout in supported countries).</li>
+<li>PayPal redirects back to <code>/cashier/paypal/return/{intent_uid}?token=…</code>.</li>
+<li>Return handler calls <code>POST /v2/checkout/orders/{id}/capture</code> inline. Money lands in your PayPal balance immediately; the <code>PaymentIntent</code> flips to <code>SUCCEEDED</code>; the local subscription term starts.</li>
+</ol>
+<h3 id="subscription-paypal-subscription-gateway">Subscription (PayPal Subscription gateway)</h3>
+<pre><code>GET /cashier/paypal-subscription/checkout/{intent_uid}?return_url=…
+</code></pre>
+<ol>
+<li>Plugin looks up the local-plan → PayPal-plan mapping (<a href="#6-map-your-local-plans-to-paypal-billing-plans-subscription-only">§6</a>).</li>
+<li>Plugin calls <code>POST /v1/billing/subscriptions</code> against the mapped <code>P-…</code> plan id.</li>
+<li>PayPal returns an <code>approve</code> URL.</li>
+<li>302 to that URL.</li>
+<li>Customer approves at PayPal (must use a PayPal account — recurring billing requires a stored agreement; guest card flow is not available for subscriptions).</li>
+<li>PayPal redirects back to <code>/cashier/paypal-subscription/return/{intent_uid}?subscription_id=…</code>.</li>
+<li>Return handler stores the PayPal subscription id and marks the local subscription <code>active</code>.</li>
+<li>Subsequent renewals are detected by the periodic sync (<a href="#8-subscription-state-sync">§8</a>).</li>
+</ol>
+<p>For both gateways, the customer can also cancel at PayPal (e.g. via the link in their PayPal account); the periodic sync catches that on the next tick.</p>
+<hr>
 <h2 id="8-subscription-state-sync">8. Subscription state sync</h2>
-<p>Once a customer activates a subscription, PayPal owns its lifecycle (renewals, cancellations, failures, refunds). Acelle pulls state on demand.</p>
+<p>For the PayPal Subscription gateway, PayPal owns the subscription&#39;s lifecycle (renewals, cancellations, failures, refunds). Acelle pulls state on demand.</p>
 <p>Three sync triggers:</p>
 <table>
 <thead>
@@ -390,6 +427,7 @@ GET /cashier/paypal/return/{intent_uid}?cancel=1           # customer cancelled
 </tr>
 </tbody></table>
 <p>Because the architecture is pull-not-push, state lags reality by at most one sync interval (typically minutes). For SaaS billing this is fine — the customer doesn&#39;t see the new sub status the literal microsecond PayPal confirms it; they see it on the next page render or the next periodic tick.</p>
+<p>The one-off <strong>PayPal</strong> gateway needs no sync — there&#39;s no subscription lifecycle to track. Each capture completes inline at the return URL.</p>
 <hr>
 <h2 id="9-sandbox-testing">9. Sandbox testing</h2>
 <p>PayPal Sandbox is fully isolated from Live — separate accounts, separate balances, separate API hosts.</p>
@@ -397,10 +435,11 @@ GET /cashier/paypal/return/{intent_uid}?cancel=1           # customer cancelled
 <ol>
 <li>Go to <a href="https://developer.paypal.com/dashboard/">developer.paypal.com/dashboard</a> → <strong>Sandbox → Accounts</strong>. PayPal gives you 2 default sandbox accounts (one business, one personal).</li>
 <li>Note the <strong>personal</strong> account&#39;s email — that&#39;s the buyer you&#39;ll use to &quot;pay&quot; in test transactions.</li>
-<li>In your Acelle PayPal gateway, choose <strong>Environment = Sandbox</strong> and use the <strong>Sandbox</strong> Client ID / Secret.</li>
+<li>In your Acelle PayPal gateway(s), choose <strong>Environment = Sandbox</strong> and use the <strong>Sandbox</strong> Client ID / Secret.</li>
 <li>At checkout, sign in with the personal sandbox account email when redirected to PayPal.</li>
 </ol>
 <p>You can create additional sandbox accounts in different currencies / countries from the same dashboard — useful for testing currency conversion and country-restricted scenarios.</p>
+<p>For <strong>PayPal Subscription</strong> testing, you also need to <strong>create at least one Sandbox Billing Plan</strong> in your sandbox PayPal business account and map it to a local Acelle plan via the Remote Plan Mapping UI.</p>
 <blockquote>
 <p><strong>Sandbox sometimes returns <code>INTERNAL_SERVICE_ERROR</code></strong> on first request after a long quiet period — PayPal&#39;s sandbox cold-starts. Retry once.</p>
 </blockquote>
@@ -430,6 +469,11 @@ GET /cashier/paypal/return/{intent_uid}?cancel=1           # customer cancelled
 <td>Check the PaymentIntent — if the return-handler saw <code>cancel=1</code>, the intent is marked CANCELLED. If status is stuck PENDING, the customer closed the tab without approving</td>
 </tr>
 <tr>
+<td>Customer sees <code>&quot;This plan is not mapped to a PayPal Billing Plan&quot;</code></td>
+<td>Local plan not mapped to a PayPal Plan id (subscription gateway only)</td>
+<td>Map at PayPal Subscription gateway → Plans &amp; Subscriptions → Remote Plan Mapping (<a href="#6-map-your-local-plans-to-paypal-billing-plans-subscription-only">§6</a>)</td>
+</tr>
+<tr>
 <td>Renewals not appearing in Acelle</td>
 <td>Sync cron not running, or PayPal subscription was cancelled outside Acelle</td>
 <td>Run <code>php artisan schedule:run</code> manually; check the sub status at PayPal → Subscriptions</td>
@@ -438,11 +482,6 @@ GET /cashier/paypal/return/{intent_uid}?cancel=1           # customer cancelled
 <td><code>cURL error 28: Operation timed out</code></td>
 <td>Outbound firewall blocks PayPal API hosts</td>
 <td>Open port 443 to <code>api-m.paypal.com</code> and <code>api-m.sandbox.paypal.com</code></td>
-</tr>
-<tr>
-<td><code>Plan not found</code> when subscribing</td>
-<td>Local plan not mapped to a PayPal Plan id</td>
-<td>Map at gateway → Plans &amp; Subscriptions → Remote Plan Mapping (<a href="#6-map-your-local-plans-to-paypal-billing-plans">§6</a>)</td>
 </tr>
 <tr>
 <td>Plugin shows Active but PayPal missing from gateway picker</td>
@@ -455,7 +494,7 @@ GET /cashier/paypal/return/{intent_uid}?cancel=1           # customer cancelled
 <h2 id="11-uninstall">11. Uninstall</h2>
 <ol>
 <li>Open <strong>System → Plugins</strong>.</li>
-<li>Find <strong>PayPal Payment Gateway</strong>, click the <strong>⋮</strong> menu and pick <strong>Disable</strong>. The PayPal gateway type immediately disappears from the admin gateway picker — existing <code>payment_gateways</code> rows of type <code>paypal</code> are kept (so you don&#39;t lose audit history).</li>
+<li>Find <strong>PayPal Payment Gateway</strong>, click the <strong>⋮</strong> menu and pick <strong>Disable</strong>. Both PayPal gateways immediately disappear from the admin gateway picker — existing <code>payment_gateways</code> rows of type <code>paypal</code> and <code>paypal-subscription</code> are kept (so you don&#39;t lose audit history).</li>
 <li>To also remove the plugin files: same menu → <strong>Delete</strong>. This rolls back the plugin&#39;s migrations and removes the on-disk folder.</li>
 </ol>
 <p>The core Acelle install is left exactly as it was. The PayPal app in your developer dashboard is unaffected — feel free to keep it for later use or delete it from PayPal&#39;s dashboard if you no longer need it.</p>
