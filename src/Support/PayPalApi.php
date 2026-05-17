@@ -126,6 +126,55 @@ class PayPalApi
         return $data;
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  Static vendor helpers (currency map + amount format + HATEOAS link).
+    //  Shared by PayPalGateway and PayPalSubscriptionGateway so neither
+    //  duplicates the vendor-specific rules.
+    // ─────────────────────────────────────────────────────────────────────
+
+    public const SUPPORTED_CURRENCIES = [
+        'USD','EUR','GBP','CAD','AUD','JPY','CHF','NZD','SGD','HKD','SEK',
+        'DKK','PLN','CZK','HUF','BRL','MXN','TWD','THB','PHP','MYR','ILS','NOK',
+    ];
+
+    public const ZERO_DECIMAL_CURRENCIES = ['JPY'];
+
+    public static function assertSupportedCurrency(string $currency): string
+    {
+        $iso = strtoupper($currency);
+        if (!in_array($iso, self::SUPPORTED_CURRENCIES, true)) {
+            throw new \InvalidArgumentException(
+                "PayPal: unsupported currency '{$currency}'. Supported: "
+                . implode(', ', self::SUPPORTED_CURRENCIES) . '.'
+            );
+        }
+        return $iso;
+    }
+
+    /**
+     * PayPal Orders v2 wants `amount.value` as a decimal string. Zero-decimal
+     * currencies (JPY in our list) must NOT have decimals — `"49.00"` is
+     * rejected by PayPal as `INVALID_PARAMETER_VALUE` for JPY.
+     */
+    public static function formatAmount(float $amountMajor, string $iso): string
+    {
+        if (in_array($iso, self::ZERO_DECIMAL_CURRENCIES, true)) {
+            return (string) (int) round($amountMajor);
+        }
+        return number_format($amountMajor, 2, '.', '');
+    }
+
+    /** Pull a link by rel from PayPal's HATEOAS links[] block. */
+    public static function linkRel(array $links, string $rel): ?string
+    {
+        foreach ($links as $link) {
+            if (($link['rel'] ?? null) === $rel) {
+                return $link['href'] ?? null;
+            }
+        }
+        return null;
+    }
+
     /**
      * Pull the most-informative human reason from a PayPal error envelope.
      * Priority: details[0].description → details[0].issue → message → name →
