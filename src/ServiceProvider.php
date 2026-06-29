@@ -99,7 +99,6 @@ class ServiceProvider extends Base
                 environment:  (string) ($gw->getGatewayData('environment') ?: 'sandbox'),
             ),
             icon: 'payments',
-            isRemoteSubscription: false,
             formView: 'paypal::form',
         );
 
@@ -114,7 +113,6 @@ class ServiceProvider extends Base
                 environment:  (string) ($gw->getGatewayData('environment') ?: 'sandbox'),
             ),
             icon: 'subscriptions',
-            isRemoteSubscription: true,
             formView: 'paypal::form',
         );
 

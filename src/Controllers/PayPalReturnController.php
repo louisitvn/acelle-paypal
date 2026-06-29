@@ -39,80 +39,65 @@ class PayPalReturnController extends Controller
         }
 
         $intent->load(['paymentGateway', 'invoice.customer']);
-        try {
-            $service = Billing::resolveService($intent->paymentGateway);
-            if (!$service instanceof PayPalGateway) {
-                return redirect()->away($merchantReturn);
-            }
+        $service = Billing::resolveService($intent->paymentGateway);
+        if (!$service instanceof PayPalGateway) {
+            return redirect()->away($merchantReturn);
+        }
 
-            $handler   = app(CheckoutHandlerInterface::class);
-            $intentDto = $intent->toDto();
-            $payerEmail = (string) ($intent->invoice?->billing_email ?: $intent->invoice?->customer?->email ?: '');
+        $handler   = app(CheckoutHandlerInterface::class);
+        $intentDto = $intent->toDto();
 
-            $pm = $handler->createPaymentMethod($intentDto, [
-                'paypal_order_id' => (string) ($intent->metadata['paypal_order_id'] ?? ''),
-                'payer_email'     => $payerEmail,
-                'card_type'       => 'PayPal',
-                'last_4'          => '',
+        // ─── cancel branch
+        if ($request->query('cancel')) {
+            \Log::info('PayPal one-off return: customer cancelled', ['intent_uid' => $intentUid]);
+            $handler->onPaymentFailed($intentDto, trans('paypal::messages.checkout.cancelled'));
+            return redirect()->away($merchantReturn);
+        }
+
+        $paypalOrderId = (string) ($request->query('token')
+            ?: ($intent->metadata['paypal_order_id'] ?? ''));
+        if ($paypalOrderId === '') {
+            \Log::warning('PayPal one-off return: no order id available', [
+                'intent_uid' => $intentUid,
+                'query'      => $request->query(),
             ]);
+            return redirect()->away($merchantReturn);
+        }
 
-            // ─── cancel branch
-            if ($request->query('cancel')) {
-                \Log::info('PayPal one-off return: customer cancelled', ['intent_uid' => $intentUid]);
-                $handler->onPaymentFailed($intentDto, $pm, trans('paypal::messages.checkout.cancelled'));
-                return redirect()->away($merchantReturn);
-            }
-
-            $paypalOrderId = (string) ($request->query('token') ?? '');
-            if (!$paypalOrderId) {
-                $paypalOrderId = (string) ($intent->metadata['paypal_order_id'] ?? '');
-            }
-            if ($paypalOrderId === '') {
-                \Log::warning('PayPal one-off return: no order id available', [
-                    'intent_uid' => $intentUid,
-                    'query'      => $request->query(),
-                ]);
-                return redirect()->away($merchantReturn);
-            }
-
-            try {
-                $captureResp = $service->captureOrder($paypalOrderId);
-            } catch (\Throwable $e) {
-                \Log::warning('PayPal one-off return: capture failed', [
-                    'intent_uid'      => $intentUid,
-                    'paypal_order_id' => $paypalOrderId,
-                    'error'           => $e->getMessage(),
-                ]);
-                $handler->onPaymentFailed($intentDto, $pm, $e->getMessage());
-                return redirect()->away($merchantReturn);
-            }
-
-            $captureStatus = strtoupper((string) ($captureResp['status'] ?? ''));
-            \Log::info('PayPal one-off return: capture polled', [
+        // Capture is the one EXPECTED transient failure point — catch + fail the intent so the
+        // customer sees the failure banner. A completion-dispatch bug below is NOT caught (crashes loud).
+        try {
+            $captureResp = $service->captureOrder($paypalOrderId);
+        } catch (\Throwable $e) {
+            \Log::warning('PayPal one-off return: capture failed', [
                 'intent_uid'      => $intentUid,
                 'paypal_order_id' => $paypalOrderId,
-                'capture_status'  => $captureStatus,
+                'error'           => $e->getMessage(),
             ]);
-
-            match ($captureStatus) {
-                'COMPLETED' => $handler->onPaymentSuccess($intentDto, $pm, $paypalOrderId),
-
-                // PayPal hasn't finalised yet — leave intent PENDING.
-                'PENDING', 'PAYER_ACTION_REQUIRED' => null,
-
-                'DECLINED', 'FAILED', 'VOIDED' => $handler->onPaymentFailed(
-                    $intentDto, $pm,
-                    "PayPal capture status: {$captureStatus}"
-                ),
-
-                default => $this->onUnknownStatus($handler, $intentDto, $pm, $intentUid, $captureStatus),
-            };
-        } catch (\Throwable $e) {
-            \Log::warning('PayPal one-off return: dispatch failed (non-fatal)', [
-                'intent_uid' => $intentUid,
-                'error'      => $e->getMessage(),
-            ]);
+            $handler->onPaymentFailed($intentDto, $e->getMessage());
+            return redirect()->away($merchantReturn);
         }
+
+        $captureStatus = strtoupper((string) ($captureResp['status'] ?? ''));
+        \Log::info('PayPal one-off return: capture polled', [
+            'intent_uid'      => $intentUid,
+            'paypal_order_id' => $paypalOrderId,
+            'capture_status'  => $captureStatus,
+        ]);
+
+        match ($captureStatus) {
+            'COMPLETED' => $handler->onPaymentSuccess($intentDto, $paypalOrderId),
+
+            // PayPal hasn't finalised yet — leave intent PENDING.
+            'PENDING', 'PAYER_ACTION_REQUIRED' => null,
+
+            'DECLINED', 'FAILED', 'VOIDED' => $handler->onPaymentFailed(
+                $intentDto,
+                "PayPal capture status: {$captureStatus}"
+            ),
+
+            default => $this->onUnknownStatus($handler, $intentDto, $intentUid, $captureStatus),
+        };
 
         return redirect()->away($merchantReturn);
     }
@@ -120,7 +105,6 @@ class PayPalReturnController extends Controller
     private function onUnknownStatus(
         CheckoutHandlerInterface $handler,
         \App\Cashier\DTO\PaymentIntent $intentDto,
-        \App\Cashier\Contracts\PaymentMethodInfoInterface $pm,
         string $intentUid,
         string $status
     ): void {
@@ -128,6 +112,6 @@ class PayPalReturnController extends Controller
             'intent_uid' => $intentUid,
             'status'     => $status,
         ]);
-        $handler->onPaymentFailed($intentDto, $pm, "PayPal returned unknown status: {$status}");
+        $handler->onPaymentFailed($intentDto, "PayPal returned unknown status: {$status}");
     }
 }

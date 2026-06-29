@@ -4,6 +4,8 @@ namespace Acelle\Paypal\Services;
 
 use Acelle\Paypal\Support\PayPalApi;
 use App\Cashier\Contracts\IntentGatewayInterface;
+use App\Cashier\DTO\CheckoutHandle;
+use App\Cashier\DTO\DirectCheckout;
 use App\Cashier\DTO\PaymentIntent;
 
 /**
@@ -44,25 +46,12 @@ class PayPalGateway implements IntentGatewayInterface
     //  IntentGatewayInterface
     // ──────────────────────────────────────────────────────────────────────
 
-    public function getCheckoutUrl(PaymentIntent $intent, string $returnUrl): string
+    public function getCheckoutUrl(PaymentIntent $intent, string $returnUrl, ?string $cancelUrl = null): CheckoutHandle
     {
-        return route('paypal.checkout', ['intent_uid' => $intent->uid])
-            . '?return_url=' . urlencode($returnUrl);
-    }
-
-    public function getMethodTitle(array $billingData): string
-    {
-        return (string) ($billingData['card_type'] ?? 'PayPal');
-    }
-
-    public function getMethodInfo(array $billingData): string
-    {
-        $email = $billingData['payer_email'] ?? null;
-        if ($email) {
-            return (string) $email;
-        }
-        $last4 = $billingData['last_4'] ?? null;
-        return $last4 ? '**** **** **** ' . $last4 : 'PayPal account';
+        return new DirectCheckout(
+            route('paypal.checkout', ['intent_uid' => $intent->uid])
+            . '?return_url=' . urlencode($returnUrl)
+        );
     }
 
     // ──────────────────────────────────────────────────────────────────────

@@ -4,15 +4,18 @@ namespace Acelle\Paypal\Services;
 
 use Acelle\Paypal\Support\PayPalApi;
 use App\Cashier\Contracts\IntentGatewayInterface;
-use App\Cashier\Contracts\RemoteSubscriptionGatewayInterface;
-use App\Cashier\Contracts\SupportsSubscriptionInterface;
+use App\Cashier\Contracts\ManageRemoteSubscriptionInterface;
+use App\Cashier\Contracts\SupportsRemoteHostedCheckout;
+use App\Cashier\Contracts\SupportsRemoteCatalogInterface;
 use App\Cashier\DTO\BillingOrigin;
+use App\Cashier\DTO\CheckoutHandle;
 use App\Cashier\DTO\PaymentIntent;
+use App\Cashier\DTO\PaymentMethodDTO;
+use App\Cashier\DTO\PollableCheckout;
+use App\Cashier\DTO\RemoteCheckoutSessionDTO;
 use App\Cashier\DTO\RemoteInvoiceDTO;
-use App\Cashier\DTO\RemotePaymentMethodDTO;
 use App\Cashier\DTO\RemotePlanDTO;
 use App\Cashier\DTO\RemoteSubscriptionDTO;
-use App\Cashier\DTO\SubscriptionResult;
 use Carbon\Carbon;
 
 /**
@@ -34,8 +37,9 @@ use Carbon\Carbon;
  */
 class PayPalSubscriptionGateway implements
     IntentGatewayInterface,
-    RemoteSubscriptionGatewayInterface,
-    SupportsSubscriptionInterface
+    ManageRemoteSubscriptionInterface,
+    SupportsRemoteHostedCheckout,
+    SupportsRemoteCatalogInterface
 {
     public const TYPE = 'paypal-subscription';
 
@@ -55,25 +59,81 @@ class PayPalSubscriptionGateway implements
     //  IntentGatewayInterface
     // ──────────────────────────────────────────────────────────────────────
 
-    public function getCheckoutUrl(PaymentIntent $intent, string $returnUrl): string
+    /**
+     * Create the PayPal Billing subscription (status APPROVAL_PENDING) and hand back its
+     * approve link + id. PayPal is a CATALOG gateway: the recurring price IS a PayPal
+     * Billing Plan id, carried in $spec->recurringPriceId (PlanRemoteItem.remote_price_id);
+     * the trial + amount live on the PayPal plan, so the amount dialect is unused. The buyer
+     * approves at PayPal then returns to the plugin's return controller (which reconciles the
+     * subscription via the host), which bounces them to $returnUrl.
+     */
+    public function getCheckoutUrl(PaymentIntent $intent, string $returnUrl, ?string $cancelUrl = null): CheckoutHandle
     {
-        return route('paypal-subscription.checkout', ['intent_uid' => $intent->uid])
+        $sub = $intent->subscription;
+        if ($sub === null) {
+            throw new \LogicException("PaymentIntent {$intent->uid} has no subscription spec — cannot build a PayPal hosted checkout.");
+        }
+        $clientRef = $intent->uid;
+        $browserReturn = route('paypal-subscription.return', ['intent_uid' => $clientRef])
             . '?return_url=' . urlencode($returnUrl);
+        // PayPal takes a native, separate cancel_url. Honor the host's distinct $cancelUrl
+        // (null ⇒ same as success) by routing the cancel bounce through return_url=$cancelUrl.
+        $browserCancel = route('paypal-subscription.return', ['intent_uid' => $clientRef])
+            . '?return_url=' . urlencode($cancelUrl ?? $returnUrl) . '&cancel=1';
+
+        $resp = $this->createSubscriptionViaCheckout(
+            intentUid:     $clientRef,
+            remotePlanId:  (string) $sub->remotePlanId,
+            customerEmail: (string) ($intent->payer->email ?? ''),
+            returnUrl:     $browserReturn,
+            cancelUrl:     $browserCancel,
+        );
+
+        $subscriptionId = (string) ($resp['id'] ?? '');
+        $approveUrl     = PayPalApi::linkRel($resp['links'] ?? [], 'approve');
+        if ($subscriptionId === '' || !$approveUrl) {
+            throw new \RuntimeException('PayPal: subscription create returned no id / approve link');
+        }
+
+        return new PollableCheckout(
+            url:       $approveUrl,
+            sessionId: $subscriptionId,   // host stamps this on intent.remote_reference_id
+            expiresAt: null,              // browser-return reconcile drives completion
+        );
     }
 
-    public function getMethodTitle(array $billingData): string
+    /**
+     * Poll the PayPal subscription by id (= the session handle) and map its status to the
+     * checkout-session shape. ACTIVE → complete/paid; APPROVAL_PENDING/APPROVED/SUSPENDED →
+     * open (still settling); CANCELLED/EXPIRED → expired.
+     */
+    public function getCheckoutSession(string $sessionId): RemoteCheckoutSessionDTO
     {
-        return 'PayPal Subscription';
-    }
+        $sub    = $this->api->get("/v1/billing/subscriptions/{$sessionId}");
+        $status = $this->normalizeSubscriptionStatus((string) ($sub['status'] ?? ''));
 
-    public function getMethodInfo(array $billingData): string
-    {
-        $email = $billingData['payer_email'] ?? null;
-        return $email ? (string) $email : 'PayPal account';
+        [$sessionStatus, $paymentStatus] = match ($status) {
+            'active'   => [RemoteCheckoutSessionDTO::STATUS_COMPLETE, RemoteCheckoutSessionDTO::PAYMENT_PAID],
+            'canceled' => [RemoteCheckoutSessionDTO::STATUS_EXPIRED,  RemoteCheckoutSessionDTO::PAYMENT_UNPAID],
+            default    => [RemoteCheckoutSessionDTO::STATUS_OPEN,     RemoteCheckoutSessionDTO::PAYMENT_UNPAID],
+        };
+
+        $billing = $sub['billing_info'] ?? [];
+
+        return new RemoteCheckoutSessionDTO(
+            id:                   $sessionId,
+            status:               $sessionStatus,
+            paymentStatus:        $paymentStatus,
+            remoteSubscriptionId: $sessionId,
+            remoteCustomerId:     $sub['subscriber']['payer_id'] ?? null,
+            currentPeriodEnd:     isset($billing['next_billing_time'])
+                                    ? Carbon::parse($billing['next_billing_time'])
+                                    : null,
+        );
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    //  Plugin-internal (called by PayPalSubscriptionCheckoutController)
+    //  Plugin-internal (the actual PayPal Subscriptions v1 create call)
     // ──────────────────────────────────────────────────────────────────────
 
     public function createSubscriptionViaCheckout(
@@ -109,25 +169,7 @@ class PayPalSubscriptionGateway implements
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    //  SupportsSubscriptionInterface
-    // ──────────────────────────────────────────────────────────────────────
-
-    /**
-     * PayPal subscriptions only emerge from a customer-approved hosted-checkout
-     * flow (no headless server-to-server creation). Throw explicitly — callers
-     * must use getCheckoutUrl() → controller → createSubscriptionViaCheckout
-     * → redirect → return → getRemoteSubscription.
-     */
-    public function createSubscription(PaymentIntent $intent, array $pmData): SubscriptionResult
-    {
-        throw new \LogicException(
-            'PayPal subscriptions are created via hosted checkout, not off-session API. ' .
-            'Use getCheckoutUrl() and pull subscription state via getRemoteSubscription().'
-        );
-    }
-
-    // ──────────────────────────────────────────────────────────────────────
-    //  RemoteSubscriptionGatewayInterface — read/sync side
+    //  ManageRemoteSubscriptionInterface + SupportsRemoteCatalogInterface — read/sync side
     // ──────────────────────────────────────────────────────────────────────
 
     /** @return RemotePlanDTO[] */
@@ -205,11 +247,6 @@ class PayPalSubscriptionGateway implements
         }
     }
 
-    public function extractRemotePaymentMethodId(array $autobillingData): ?string
-    {
-        return $autobillingData['paypal_payment_token_id'] ?? null;
-    }
-
     public function updateRemoteSubscriptionPlan(
         string $remoteSubscriptionId,
         string $newRemotePlanId
@@ -220,19 +257,22 @@ class PayPalSubscriptionGateway implements
         return $this->getRemoteSubscription($remoteSubscriptionId);
     }
 
-    public function getRemotePaymentMethod(string $remoteSubscriptionId): ?RemotePaymentMethodDTO
+    public function getRemotePaymentMethod(string $remoteSubscriptionId): ?PaymentMethodDTO
     {
         $response = $this->api->get("/v1/billing/subscriptions/{$remoteSubscriptionId}");
         $subscriber = $response['subscriber'] ?? null;
         if (!$subscriber) {
             return null;
         }
-        return new RemotePaymentMethodDTO(
-            cardType:       null,
-            last4:          null,
-            expirationDate: null,
-            email:          $subscriber['email_address'] ?? null,
-            type:           'paypal',
+        $payerId = $subscriber['payer_id'] ?? null;
+        return new PaymentMethodDTO(
+            cardType:              null,
+            last4:                 null,
+            expirationDate:        null,
+            email:                 $subscriber['email_address'] ?? null,
+            type:                  'paypal',
+            remotePaymentMethodId: $payerId,
+            remoteCustomerId:      $payerId,
         );
     }
 

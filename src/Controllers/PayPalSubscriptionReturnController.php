@@ -10,18 +10,25 @@ use App\Model\PaymentIntent;
 use Illuminate\Http\Request;
 
 /**
- * PayPal Subscription return URL — fires after customer approves (or cancels)
- * the recurring subscription at PayPal. Two branches:
- *   - ?cancel=1                     → onPaymentFailed("User cancelled at PayPal")
- *   - ?subscription_id=I-...  (or stamped on metadata)
- *                                   → getRemoteSubscription, if ACTIVE
- *                                     dispatch onSubscriptionCreated; if
- *                                     terminal-bad dispatch onPaymentFailed.
+ * PayPal Subscription return URL — fires after the buyer approves (or cancels) the recurring
+ * subscription at PayPal, then completes it on the browser-return (the primary completion
+ * trigger; the pull-sync layer is the backup). Mirrors the 2C2P return-controller shape:
  *
- * Idempotent. Always redirects to merchant return_url at the end.
+ *   - ?cancel=1                  → onPaymentFailed("cancelled at PayPal").
+ *   - otherwise                  → poll getCheckoutSession(subId) (absorbing PayPal's
+ *                                  activation lag) and, once ACTIVE, fire onSubscriptionCreated
+ *                                  with the canonical RemoteSubscriptionDTO + the PayPal payer
+ *                                  as the saved method. Not-yet-active → defer to the sync layer.
+ *
+ * The session id (= the PayPal subscription id) is the host's `remote_reference_id`, stamped by
+ * getCheckoutUrl. Idempotent (intent-status guard). Always redirects to return_url.
  */
 class PayPalSubscriptionReturnController extends Controller
 {
+    /** Browser-return inquiry poll — absorbs PayPal's post-approval activation lag (≤ ~8s). */
+    private const RECONCILE_ATTEMPTS = 5;
+    private const RECONCILE_DELAY_US = 2_000_000; // 2s between attempts
+
     public function handle(Request $request, string $intentUid)
     {
         $merchantReturn = (string) $request->query('return_url', url('/'));
@@ -32,98 +39,95 @@ class PayPalSubscriptionReturnController extends Controller
             return redirect()->away($merchantReturn);
         }
 
-        if ($intent->status !== \App\Model\PaymentIntent::STATUS_PENDING
-            && $intent->status !== \App\Model\PaymentIntent::STATUS_REQUIRES_ACTION) {
+        $intent->load(['paymentGateway']);
+        $service = Billing::resolveService($intent->paymentGateway);
+        if (!$service instanceof PayPalSubscriptionGateway) {
             return redirect()->away($merchantReturn);
         }
 
-        $intent->load(['paymentGateway', 'invoice.customer']);
-        try {
-            $service = Billing::resolveService($intent->paymentGateway);
-            if (!$service instanceof PayPalSubscriptionGateway) {
-                return redirect()->away($merchantReturn);
-            }
+        // Already settled (a prior return or the sync layer beat us) — bounce.
+        if ($intent->status !== PaymentIntent::STATUS_PENDING
+            && $intent->status !== PaymentIntent::STATUS_REQUIRES_ACTION) {
+            return redirect()->away($merchantReturn);
+        }
 
-            $handler   = app(CheckoutHandlerInterface::class);
-            $intentDto = $intent->toDto();
-            $payerEmail = (string) ($intent->invoice?->billing_email ?: $intent->invoice?->customer?->email ?: '');
+        $handler   = app(CheckoutHandlerInterface::class);
+        $intentDto = $intent->toDto();
 
-            $pm = $handler->createPaymentMethod($intentDto, [
-                'paypal_subscription_id' => (string) ($intent->metadata['paypal_subscription_id'] ?? ''),
-                'payer_email'            => $payerEmail,
-                'card_type'              => 'PayPal',
-                'last_4'                 => '',
+        // Buyer cancelled at PayPal.
+        if ($request->query('cancel')) {
+            \Log::info('PayPal sub return: customer cancelled', ['intent_uid' => $intentUid]);
+            $handler->onPaymentFailed($intentDto, trans('paypal::messages.checkout.cancelled'));
+            return redirect()->away($merchantReturn);
+        }
+
+        // Session handle = the PayPal subscription id (host stamps it on remote_reference_id;
+        // accept PayPal's return query / legacy metadata as fallbacks).
+        $subId = (string) ($intent->remote_reference_id
+            ?: $request->query('subscription_id')
+            ?: ($intent->metadata['paypal_subscription_id'] ?? ''));
+        if ($subId === '') {
+            \Log::warning('PayPal sub return: no subscription id available', [
+                'intent_uid' => $intentUid,
+                'query'      => $request->query(),
             ]);
+            return redirect()->away($merchantReturn);
+        }
 
-            // ─── cancel branch
-            if ($request->query('cancel')) {
-                \Log::info('PayPal sub return: customer cancelled', ['intent_uid' => $intentUid]);
-                $handler->onPaymentFailed($intentDto, $pm, trans('paypal::messages.checkout.cancelled'));
-                return redirect()->away($merchantReturn);
-            }
-
-            $paypalSubId = (string) ($request->query('subscription_id') ?? '');
-            if (!$paypalSubId) {
-                $paypalSubId = (string) ($intent->metadata['paypal_subscription_id'] ?? '');
-            }
-            if ($paypalSubId === '') {
-                \Log::warning('PayPal sub return: no subscription id available', [
+        // Poll the inquiry (the one EXPECTED transient failure point) until the subscription is
+        // ACTIVE, then defer. Caught + retried; a genuine completion failure (onSubscriptionCreated
+        // below) is OUTSIDE this guard and crashes loud — never swallowed.
+        $session = null;
+        for ($attempt = 1; $attempt <= self::RECONCILE_ATTEMPTS; $attempt++) {
+            try {
+                $candidate = $service->getCheckoutSession($subId);
+                if ($candidate->isComplete()) {
+                    $session = $candidate;
+                    break;
+                }
+                if ($candidate->isExpired()) {
+                    $handler->onPaymentFailed($intentDto, 'PayPal subscription was cancelled/expired before activation');
+                    return redirect()->away($merchantReturn);
+                }
+            } catch (\Throwable $e) {
+                \Log::warning('PayPal sub return: inquiry failed — will retry/defer', [
                     'intent_uid' => $intentUid,
-                    'query'      => $request->query(),
+                    'error'      => $e->getMessage(),
                 ]);
-                return redirect()->away($merchantReturn);
             }
+            if ($attempt < self::RECONCILE_ATTEMPTS) {
+                usleep(self::RECONCILE_DELAY_US);
+            }
+        }
 
-            $sub = $service->getRemoteSubscription($paypalSubId);
-            \Log::info('PayPal sub return: state polled', [
-                'intent_uid'    => $intentUid,
-                'paypal_sub_id' => $paypalSubId,
-                'status'        => $sub->status,
+        if ($session === null) {
+            \Log::info('PayPal sub return: not active yet — deferring to the sync layer', [
+                'intent_uid' => $intentUid,
+                'paypal_sub_id' => $subId,
             ]);
+            return redirect()->away($merchantReturn);
+        }
 
-            match ($sub->status) {
-                'active' => $handler->onSubscriptionCreated($intentDto, [
-                    'remote_subscription_id' => $paypalSubId,
-                    'remote_customer_id'     => $sub->remoteCustomerId,
-                    'current_period_end'     => $sub->currentPeriodEnd?->timestamp,
-                    'payment_method_data'    => [
-                        'payer_email'            => $payerEmail,
-                        'paypal_subscription_id' => $paypalSubId,
-                    ],
-                ]),
-
-                // Sub still APPROVAL_PENDING / APPROVED — leave intent PENDING,
-                // sync layer will catch up.
-                'incomplete' => null,
-
-                'canceled', 'paused' => $handler->onPaymentFailed(
-                    $intentDto, $pm,
-                    "PayPal subscription state: {$sub->status}"
-                ),
-
-                default => $this->onUnknownStatus($handler, $intentDto, $pm, $intentUid, $sub->status),
-            };
+        // COMPLETE — commit via the shared handler. Card-read is non-fatal (narrow catch);
+        // onSubscriptionCreated is NOT caught.
+        $remoteSub = $service->getRemoteSubscription($session->remoteSubscriptionId);
+        $pm = null;
+        try {
+            $pm = $service->getRemotePaymentMethod($session->remoteSubscriptionId);
         } catch (\Throwable $e) {
-            \Log::warning('PayPal sub return: dispatch failed (non-fatal)', [
+            \Log::warning('PayPal sub return: getRemotePaymentMethod failed (non-fatal)', [
                 'intent_uid' => $intentUid,
                 'error'      => $e->getMessage(),
             ]);
         }
 
-        return redirect()->away($merchantReturn);
-    }
+        $handler->onSubscriptionCreated($intentDto, $remoteSub, $pm);
 
-    private function onUnknownStatus(
-        CheckoutHandlerInterface $handler,
-        \App\Cashier\DTO\PaymentIntent $intentDto,
-        \App\Cashier\Contracts\PaymentMethodInfoInterface $pm,
-        string $intentUid,
-        string $status
-    ): void {
-        \Log::warning('PayPal sub return: unknown status', [
-            'intent_uid' => $intentUid,
-            'status'     => $status,
+        \Log::info('PayPal sub return: subscription activated on browser-return', [
+            'intent_uid'    => $intentUid,
+            'paypal_sub_id' => $session->remoteSubscriptionId,
         ]);
-        $handler->onPaymentFailed($intentDto, $pm, "PayPal returned unknown subscription status: {$status}");
+
+        return redirect()->away($merchantReturn);
     }
 }

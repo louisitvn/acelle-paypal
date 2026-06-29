@@ -94,9 +94,14 @@ class PayPalSubscriptionCheckoutController extends Controller
     }
 
     /**
-     * Resolve the PayPal Billing Plan ID. Honour intent.metadata first (set
-     * by SubscriptionController during pay-attempt for the picked gateway),
-     * then fall back to a DB lookup of PlanRemoteMapping for the gateway.
+     * Resolve the PayPal Billing Plan ID. Honour intent.metadata first, then fall back to the
+     * plan's remote-subscription item (PlanRemoteItem) — the canonical mapping after the
+     * `plan_remote_mappings` table was retired in favour of `plan_remote_items`.
+     *
+     * NOTE: in the current design the host drives remote subscriptions through
+     * SubscriptionManagementService::getCheckoutUrl (→ the gateway's
+     * getCheckoutUrl), so this controller is a legacy/alt entry; it stays correct +
+     * crash-free for any code path that still routes through getCheckoutUrl().
      */
     private function resolveRemotePlanId(PaymentIntent $intent): ?string
     {
@@ -110,11 +115,7 @@ class PayPalSubscriptionCheckoutController extends Controller
             return null;
         }
 
-        $mapping = \DB::table('plan_remote_mappings')
-            ->where('plan_id', $plan->id)
-            ->where('payment_gateway_id', $intent->payment_gateway_id)
-            ->first();
-
-        return $mapping?->remote_plan_id ? (string) $mapping->remote_plan_id : null;
+        $sub = \App\Model\PlanRemoteItem::subscriptionFor($plan->id);
+        return $sub?->remote_price_id ? (string) $sub->remote_price_id : null;
     }
 }

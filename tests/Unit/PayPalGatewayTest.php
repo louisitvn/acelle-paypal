@@ -108,21 +108,4 @@ class PayPalGatewayTest extends TestCase
         $this->assertSame('GET', $fake->lastMethod);
         $this->assertSame('/v2/checkout/orders/PAYPAL-ORDER-2', $fake->lastPath);
     }
-
-    // ── 3. IntentGatewayInterface display ────────────────────────────────
-
-    public function test_get_method_title_uses_billing_data_with_paypal_fallback(): void
-    {
-        $gw = $this->makeGateway(new FakePayPalApi());
-        $this->assertSame('Visa', $gw->getMethodTitle(['card_type' => 'Visa']));
-        $this->assertSame('PayPal', $gw->getMethodTitle([]));
-    }
-
-    public function test_get_method_info_prefers_email_over_last4(): void
-    {
-        $gw = $this->makeGateway(new FakePayPalApi());
-        $this->assertSame('a@b.c', $gw->getMethodInfo(['payer_email' => 'a@b.c', 'last_4' => '1234']));
-        $this->assertSame('**** **** **** 1234', $gw->getMethodInfo(['last_4' => '1234']));
-        $this->assertSame('PayPal account', $gw->getMethodInfo([]));
-    }
 }

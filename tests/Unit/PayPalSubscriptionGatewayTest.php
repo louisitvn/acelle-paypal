@@ -4,8 +4,8 @@ namespace Acelle\Paypal\Tests\Unit;
 
 use Acelle\Paypal\Services\PayPalSubscriptionGateway;
 use App\Cashier\DTO\BillingOrigin;
+use App\Cashier\DTO\PaymentMethodDTO;
 use App\Cashier\DTO\RemoteInvoiceDTO;
-use App\Cashier\DTO\RemotePaymentMethodDTO;
 use App\Cashier\DTO\RemotePlanDTO;
 use App\Cashier\DTO\RemoteSubscriptionDTO;
 use Tests\TestCase;
@@ -21,10 +21,10 @@ require_once __DIR__ . '/FakePayPalApi.php';
  *   2. Status / DTO mapping (PayPal JSON → local DTO)
  *   3. Plan mapping (REGULAR/TRIAL cycle pick, interval normalization, trial days)
  *   4. Transaction → RemoteInvoiceDTO (status, oldest-first, cursor, RECURRING origin)
- *   5. Cancel / Resume / Update / Extract / GetRemotePaymentMethod
+ *   5. Cancel / Resume / Update / GetRemotePaymentMethod (→ PaymentMethodDTO)
  *   6. Pagination + empty-page fallback
  *   7. Pull-only contract (webhook stubs return inert values)
- *   8. SupportsSubscriptionInterface::createSubscription throws (hosted-only)
+ *   8. Hosted-checkout mechanism — buildRemoteCheckoutUrl + getCheckoutSession
  */
 class PayPalSubscriptionGatewayTest extends TestCase
 {
@@ -66,19 +66,51 @@ class PayPalSubscriptionGatewayTest extends TestCase
             ->createSubscriptionViaCheckout('uid', '', 'a@b.c', 'http://r', 'http://c');
     }
 
-    public function test_create_subscription_interface_method_throws(): void
+    public function test_build_remote_checkout_url_creates_subscription_and_returns_approve_link(): void
     {
-        $this->expectException(\LogicException::class);
-        $this->expectExceptionMessageMatches('/hosted checkout/');
+        // The gateway wraps the host return URL in the plugin return route — register a stub.
+        \Illuminate\Support\Facades\Route::get('/t/paypal-sub/return/{intent_uid}', fn () => '')
+            ->name('paypal-subscription.return');
+        app('router')->getRoutes()->refreshNameLookups();
 
-        $intent = new \App\Cashier\DTO\PaymentIntent(
-            uid: 'uid', amount: 49.0, currency: 'USD', description: 'd',
-            paymentGatewayId: 'gw', payer: new \App\Cashier\DTO\Payer(
-                uid: 'cid', name: 'n', email: 'e@x.y',
+        $fake = new FakePayPalApi([
+            'id'    => 'I-NEWSUB',
+            'links' => [['rel' => 'approve', 'href' => 'https://paypal.test/approve/I-NEWSUB']],
+        ]);
+
+        $handle = $this->makeGateway($fake)->buildRemoteCheckoutUrl(
+            $this->intent(
+                new \App\Cashier\DTO\SubscriptionSpec(remotePlanId: 'P-PLAN-123'),
+                'intent-uid-1',
+                'USD',
+                'buyer@x.y',
             ),
-            subscription: null,
+            'http://app.test/account/subscription?paid=inv1',
         );
-        $this->makeGateway(new FakePayPalApi())->createSubscription($intent, []);
+
+        $this->assertInstanceOf(\App\Cashier\DTO\RemoteCheckoutHandle::class, $handle);
+        $this->assertSame('I-NEWSUB', $handle->sessionId);
+        $this->assertSame('https://paypal.test/approve/I-NEWSUB', $handle->url);
+        $this->assertSame('P-PLAN-123', $fake->lastBody['plan_id']);
+    }
+
+    public function test_get_checkout_session_maps_active_to_complete(): void
+    {
+        $fake = new FakePayPalApi([
+            'id' => 'I-1', 'status' => 'ACTIVE',
+            'subscriber' => ['payer_id' => 'PAYER1'],
+        ]);
+        $session = $this->makeGateway($fake)->getCheckoutSession('I-1');
+
+        $this->assertTrue($session->isComplete());
+        $this->assertSame('I-1', $session->remoteSubscriptionId);
+        $this->assertSame('PAYER1', $session->remoteCustomerId);
+    }
+
+    public function test_get_checkout_session_pending_stays_open(): void
+    {
+        $fake = new FakePayPalApi(['id' => 'I-2', 'status' => 'APPROVAL_PENDING']);
+        $this->assertTrue($this->makeGateway($fake)->getCheckoutSession('I-2')->isOpen());
     }
 
     // ── 2. subscriptionToDto — status + field mapping ────────────────────
@@ -343,20 +375,6 @@ class PayPalSubscriptionGatewayTest extends TestCase
         $this->assertSame('P-NEW', $dto->remotePlanId);
     }
 
-    public function test_extract_remote_payment_method_id_returns_value_when_present(): void
-    {
-        $gw = $this->makeGateway(new FakePayPalApi());
-        $this->assertSame('pp-tok-123',
-            $gw->extractRemotePaymentMethodId(['paypal_payment_token_id' => 'pp-tok-123']));
-    }
-
-    public function test_extract_remote_payment_method_id_returns_null_when_missing(): void
-    {
-        $gw = $this->makeGateway(new FakePayPalApi());
-        $this->assertNull($gw->extractRemotePaymentMethodId([]));
-        $this->assertNull($gw->extractRemotePaymentMethodId(['unrelated' => 'x']));
-    }
-
     public function test_get_remote_payment_method_returns_email_only(): void
     {
         $fake = new FakePayPalApi([
@@ -365,9 +383,10 @@ class PayPalSubscriptionGatewayTest extends TestCase
         ]);
         $pm = $this->makeGateway($fake)->getRemotePaymentMethod('I-1');
 
-        $this->assertInstanceOf(RemotePaymentMethodDTO::class, $pm);
+        $this->assertInstanceOf(PaymentMethodDTO::class, $pm);
         $this->assertSame('pp@x.c', $pm->email);
         $this->assertSame('paypal', $pm->type);
+        $this->assertSame('PID', $pm->remotePaymentMethodId);
         $this->assertNull($pm->last4);
         $this->assertNull($pm->cardType);
     }
@@ -443,6 +462,25 @@ class PayPalSubscriptionGatewayTest extends TestCase
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
+
+    /** Build a PaymentIntent carrying the given subscription spec (or null for a one-off). */
+    private function intent(
+        ?\App\Cashier\DTO\SubscriptionSpec $sub,
+        string $uid = 'i1',
+        string $currency = 'USD',
+        string $email = 'a@b.c',
+    ): \App\Cashier\DTO\PaymentIntent {
+        return new \App\Cashier\DTO\PaymentIntent(
+            uid: $uid,
+            amount: 0.0,
+            currency: $currency,
+            description: 'Subscription',
+            paymentGatewayId: 'gw',
+            payer: new \App\Cashier\DTO\Payer(uid: 'payer-1', name: 'Buyer', email: $email),
+            subscription: $sub,
+            metadata: [],
+        );
+    }
 
     private static function makeRegularCycle(string $price, string $cur): array
     {
