@@ -4,6 +4,7 @@ namespace Acelle\Paypal\Controllers;
 
 use Acelle\Paypal\Services\PayPalGateway;
 use App\Cashier\Contracts\CheckoutHandlerInterface;
+use App\Cashier\DTO\PaymentIntent as PaymentIntentDto;
 use App\Http\Controllers\Controller;
 use App\Library\Facades\Billing;
 use App\Model\PaymentIntent;
@@ -86,7 +87,7 @@ class PayPalReturnController extends Controller
         ]);
 
         match ($captureStatus) {
-            'COMPLETED' => $handler->onPaymentSuccess($intentDto, $paypalOrderId),
+            'COMPLETED' => $this->onSuccess($handler, $intentDto, $captureResp, $paypalOrderId, $intentUid),
 
             // PayPal hasn't finalised yet — leave intent PENDING.
             'PENDING', 'PAYER_ACTION_REQUIRED' => null,
@@ -100,6 +101,42 @@ class PayPalReturnController extends Controller
         };
 
         return redirect()->away($merchantReturn);
+    }
+
+    /**
+     * First-payment success: if PayPal vaulted the wallet during purchase, persist the
+     * vault id as the customer's saved PaymentMethod (so autoCharge() can replay it on
+     * renewal), THEN mark the invoice paid.
+     *
+     * The vault id lives at `payment_source.paypal.attributes.vault.id` on the capture
+     * response, with `.status === 'VAULTED'`. We persist ONLY when a real vaulted id was
+     * issued — autoCharge:true is set only in that case (never blindly). A pure one-off
+     * buyer with no future subscription simply gets a card that's never auto-charged.
+     */
+    private function onSuccess(
+        CheckoutHandlerInterface $handler,
+        PaymentIntentDto $intentDto,
+        array $captureResp,
+        string $paypalOrderId,
+        string $intentUid
+    ): void {
+        $savedCard = PayPalGateway::buildSavedPaymentMethod($captureResp);
+
+        if ($savedCard !== null) {
+            $handler->createPaymentMethod($intentDto, $savedCard);
+        } else {
+            // No vault id (buyer's account / merchant lacks Reference-Transactions
+            // underwriting, or PayPal didn't vault) — first payment still collected,
+            // but this method is NOT auto-chargeable. If a subscription depends on it,
+            // the host's renewal will fail with "missing paypal_vault_id" until admin
+            // resolves (usually: enable Reference Transactions / ACDC+Vault on the app).
+            \Log::warning('PayPal one-off return: payment COMPLETED but no vault id issued — auto-renewal will fail', [
+                'intent_uid'      => $intentUid,
+                'paypal_order_id' => $paypalOrderId,
+            ]);
+        }
+
+        $handler->onPaymentSuccess($intentDto, $paypalOrderId);
     }
 
     private function onUnknownStatus(

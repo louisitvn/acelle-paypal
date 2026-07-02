@@ -6,7 +6,6 @@ use Illuminate\Support\ServiceProvider as Base;
 use App\Library\Facades\Billing;
 use App\Library\Facades\Hook;
 use Acelle\Paypal\Services\PayPalGateway;
-use Acelle\Paypal\Services\PayPalSubscriptionGateway;
 
 class ServiceProvider extends Base
 {
@@ -81,12 +80,9 @@ class ServiceProvider extends Base
         // directly. Replace icon.svg in the plugin root with your own to brand it.
         Hook::set('icon_url_acelle/paypal', fn () => route('plugin.acelle.paypal.icon'));
 
-        // This plugin ships TWO gateway types — one for one-off Orders v2,
-        // one for recurring Subscriptions v1. Admin sees both options in the
-        // select-type modal and can configure them with independent
-        // credentials if desired (typically same sandbox/live app though).
-        // Same form view + lang prefix; differ only on TYPE, isRemoteSubscription
-        // capability, factory class, and human-readable name/description.
+        // This plugin ships ONE gateway type — 'paypal', one-off Orders v2.
+        // PayPal here is local-charge / one-off ONLY; it does NOT start
+        // provider-managed remote subscriptions.
 
         // ── 'paypal' — direct one-off gateway (Orders v2)
         Billing::register(
@@ -99,20 +95,6 @@ class ServiceProvider extends Base
                 environment:  (string) ($gw->getGatewayData('environment') ?: 'sandbox'),
             ),
             icon: 'payments',
-            formView: 'paypal::form',
-        );
-
-        // ── 'paypal-subscription' — remote-subscription gateway (Subscriptions v1)
-        Billing::register(
-            type: 'paypal-subscription',
-            name: trans('paypal::messages.subscription_gateway.name'),
-            description: trans('paypal::messages.subscription_gateway.description'),
-            serviceFactory: fn ($gw) => new PayPalSubscriptionGateway(
-                clientId:     (string) $gw->getGatewayData('client_id'),
-                clientSecret: (string) $gw->getGatewayData('client_secret'),
-                environment:  (string) ($gw->getGatewayData('environment') ?: 'sandbox'),
-            ),
-            icon: 'subscriptions',
             formView: 'paypal::form',
         );
 

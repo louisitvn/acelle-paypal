@@ -12,10 +12,8 @@ Route::get('plugins/acelle/paypal/icon.svg', function () {
     ]);
 })->name('plugin.acelle.paypal.icon');
 
-// Two payment gateway types live in this plugin — each gets its own
-// checkout/return route pair so the URL discriminates which API to call
-// (Orders v2 for 'paypal', Subscriptions v1 for 'paypal-subscription').
-// Pull-only design — no webhook routes.
+// This plugin ships ONE payment gateway type — 'paypal', one-off Orders v2.
+// It gets its own checkout/return route pair. Pull-only design — no webhook routes.
 Route::group(['middleware' => ['web']], function () {
     // ── 'paypal' — one-off Orders v2 ─────────────────────────────────
     Route::get('/cashier/paypal/checkout/{intent_uid}',
@@ -25,13 +23,4 @@ Route::group(['middleware' => ['web']], function () {
     Route::get('/cashier/paypal/return/{intent_uid}',
         [\Acelle\Paypal\Controllers\PayPalReturnController::class, 'handle'])
         ->name('paypal.return');
-
-    // ── 'paypal-subscription' — recurring Subscriptions v1 ───────────
-    Route::get('/cashier/paypal-subscription/checkout/{intent_uid}',
-        [\Acelle\Paypal\Controllers\PayPalSubscriptionCheckoutController::class, 'redirect'])
-        ->name('paypal-subscription.checkout');
-
-    Route::get('/cashier/paypal-subscription/return/{intent_uid}',
-        [\Acelle\Paypal\Controllers\PayPalSubscriptionReturnController::class, 'handle'])
-        ->name('paypal-subscription.return');
 });

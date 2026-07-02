@@ -50,23 +50,3 @@
         <div class="mc-alert-text">{!! trans('paypal::messages.form.credentials_desc') !!}</div>
     </div>
 </div>
-
-<div class="mc-alert mc-alert-info" style="margin-top:var(--space-3);">
-    <div class="mc-alert-icon">
-        <span class="material-symbols-rounded">subscriptions</span>
-    </div>
-    <div class="mc-alert-content">
-        <div class="mc-alert-title">{{ trans('paypal::messages.form.subscriptions_title') }}</div>
-        <div class="mc-alert-text">{{ trans('paypal::messages.form.subscriptions_desc') }}</div>
-    </div>
-</div>
-
-<div class="mc-alert mc-alert-info" style="margin-top:var(--space-3);">
-    <div class="mc-alert-icon">
-        <span class="material-symbols-rounded">sync</span>
-    </div>
-    <div class="mc-alert-content">
-        <div class="mc-alert-title">{{ trans('paypal::messages.form.pull_only_title') }}</div>
-        <div class="mc-alert-text">{{ trans('paypal::messages.form.pull_only_desc') }}</div>
-    </div>
-</div>

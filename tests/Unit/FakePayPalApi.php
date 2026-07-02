@@ -17,11 +17,12 @@ use Acelle\Paypal\Support\PayPalApi;
  */
 class FakePayPalApi extends PayPalApi
 {
-    public ?string $lastMethod = null;
-    public ?string $lastPath   = null;
-    public array $lastBody     = [];
-    public array $lastQuery    = [];
-    public array $callHistory  = [];
+    public ?string $lastMethod  = null;
+    public ?string $lastPath    = null;
+    public array $lastBody      = [];
+    public array $lastQuery     = [];
+    public array $lastHeaders   = [];
+    public array $callHistory   = [];
     private array $responseQueue = [];
     private ?\Throwable $nextThrow = null;
     private bool $useQueue = false;
@@ -45,26 +46,27 @@ class FakePayPalApi extends PayPalApi
 
     public function get(string $path, array $query = []): array
     {
-        return $this->capture('GET', $path, [], $query);
+        return $this->capture('GET', $path, [], $query, []);
     }
 
-    public function post(string $path, array $body): array
+    public function post(string $path, array $body, array $headers = []): array
     {
-        return $this->capture('POST', $path, $body, []);
+        return $this->capture('POST', $path, $body, [], $headers);
     }
 
     public function patch(string $path, array $body): array
     {
-        return $this->capture('PATCH', $path, $body, []);
+        return $this->capture('PATCH', $path, $body, [], []);
     }
 
-    private function capture(string $method, string $path, array $body, array $query): array
+    private function capture(string $method, string $path, array $body, array $query, array $headers): array
     {
-        $this->lastMethod = $method;
-        $this->lastPath   = $path;
-        $this->lastBody   = $body;
-        $this->lastQuery  = $query;
-        $this->callHistory[] = compact('method', 'path', 'body', 'query');
+        $this->lastMethod  = $method;
+        $this->lastPath    = $path;
+        $this->lastBody    = $body;
+        $this->lastQuery   = $query;
+        $this->lastHeaders = $headers;
+        $this->callHistory[] = compact('method', 'path', 'body', 'query', 'headers');
 
         if ($this->nextThrow !== null) {
             $t = $this->nextThrow;

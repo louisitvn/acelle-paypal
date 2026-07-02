@@ -3,7 +3,7 @@
     "title": "PayPal Payment Gateway",
     "version": "1.0.0",
     "app_version": "4.0.24",
-    "description": "Accept one-off payments and manage recurring subscriptions through PayPal (Orders v2 + Billing Subscriptions v1).",
+    "description": "Accept one-off PayPal payments (Orders v2 hosted checkout) with app-driven off-session auto-charge for renewals via a saved PayPal wallet vault.",
     "autoload": {
         "psr-4": {
             "Acelle\\Paypal\\": "src/"

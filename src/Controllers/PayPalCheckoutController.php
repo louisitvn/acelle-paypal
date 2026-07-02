@@ -43,14 +43,19 @@ class PayPalCheckoutController extends Controller
             . '?return_url=' . urlencode($merchantReturn);
         $browserCancel = $browserReturn . '&cancel=1';
 
+        // Stable per-customer key so repeat purchases attach to the same PayPal vault
+        // customer. Prefer the customer uid; fall back to email.
+        $merchantCustomerId = (string) ($customer->uid ?: $customer->email ?: '');
+
         try {
             $resp = $service->createOrder(
-                intentUid:    $intent->uid,
-                amountMajor:  (float) $intent->amount,
-                currency:     (string) ($intent->currency ?: 'USD'),
-                description:  (string) ($intent->description ?: 'Acelle invoice'),
-                returnUrl:    $browserReturn,
-                cancelUrl:    $browserCancel,
+                intentUid:          $intent->uid,
+                amountMajor:        (float) $intent->amount,
+                currency:           (string) ($intent->currency ?: 'USD'),
+                description:        (string) ($intent->description ?: 'Invoice'),
+                returnUrl:          $browserReturn,
+                cancelUrl:          $browserCancel,
+                merchantCustomerId: $merchantCustomerId,
             );
         } catch (\Throwable $e) {
             \Log::error('PayPal one-off: create failed', [
