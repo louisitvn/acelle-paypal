@@ -6,7 +6,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\BadResponseException;
 
 /**
- * Thin wrapper around PayPal REST API (Orders v2 + Subscriptions v1 + OAuth).
+ * Thin wrapper around PayPal REST API (Orders v2 + OAuth).
  *
  * Auth model: client-credentials OAuth. We hit POST /v1/oauth2/token with
  * Basic auth (client_id:client_secret), receive a Bearer access_token valid
@@ -49,93 +49,16 @@ class PayPalApi
         return $this->request('GET', $path, ['query' => $query]);
     }
 
-    /**
-     * @param array<string,string> $headers Extra request headers merged over the
-     *        Authorization/Accept/Content-Type defaults. Used for `PayPal-Request-Id`
-     *        (idempotency key) on charge calls so a cron retry never double-charges.
-     */
-    public function post(string $path, array $body, array $headers = []): array
+    public function post(string $path, array $body): array
     {
-        $options = ['json' => self::jsonBody($body)];
-        if ($headers !== []) {
-            $options['headers'] = $headers;
-        }
-        return $this->request('POST', $path, $options);
-    }
-
-    public function patch(string $path, array $body): array
-    {
-        return $this->request('PATCH', $path, ['json' => self::jsonBody($body)]);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    //  Off-session merchant-initiated charge against a saved PayPal vault id.
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Merchant-Initiated Transaction (MIT) against a saved PayPal wallet vault id —
-     * the unattended off-session renewal charge (no buyer present).
-     *
-     * Single synchronous call: POST /v2/checkout/orders with intent=CAPTURE and
-     * `payment_source.paypal.vault_id` — PayPal both creates AND captures the order in
-     * one round-trip (no separate buyer approve → capture step). `stored_credential`
-     * is REQUIRED to mark this as merchant-initiated recurring, otherwise PayPal
-     * rejects it as needing cardholder presence.
-     *
-     * Idempotency: `PayPal-Request-Id` header is set to a caller-supplied stable key so
-     * a cron retry (same key) returns the already-created order instead of charging twice.
-     *
-     * Returns the full Orders v2 create-with-capture response — caller reads top-level
-     * `id` (order id) + `status` (COMPLETED / DECLINED / PAYER_ACTION_REQUIRED / …).
-     *
-     * @link https://developer.paypal.com/docs/checkout/save-payment-methods/purchase-later/paypal/#link-chargethevaultedpaymentmethod
-     */
-    public function createVaultCharge(
-        string $vaultId,
-        string $referenceId,
-        float $amountMajor,
-        string $currency,
-        string $description,
-        string $idempotencyKey,
-    ): array {
-        $iso   = self::assertSupportedCurrency($currency);
-        $value = self::formatAmount($amountMajor, $iso);
-
-        return $this->post('/v2/checkout/orders', [
-            'intent' => 'CAPTURE',
-            'purchase_units' => [[
-                'reference_id' => $referenceId,
-                'description'  => substr($description, 0, 127),
-                'amount'       => [
-                    'currency_code' => $iso,
-                    'value'         => $value,
-                ],
-            ]],
-            'payment_source' => [
-                'paypal' => [
-                    'vault_id' => $vaultId,
-                    // REQUIRED for merchant-initiated recurring — without this
-                    // block PayPal treats the charge as needing cardholder presence
-                    // and returns PAYER_ACTION_REQUIRED / rejects it.
-                    'stored_credential' => [
-                        'payment_initiator' => 'MERCHANT',
-                        'usage'             => 'SUBSEQUENT',
-                        'usage_pattern'     => 'RECURRING_PREPAID',
-                    ],
-                ],
-            ],
-        ], [
-            // Same key on a cron retry → PayPal returns the already-created order
-            // rather than charging the saved wallet a second time.
-            'PayPal-Request-Id' => $idempotencyKey,
-        ]);
+        return $this->request('POST', $path, ['json' => self::jsonBody($body)]);
     }
 
     /**
      * PayPal endpoints reject "[]" as malformed JSON when the body is meaningfully
-     * empty (e.g. capture order, activate plan — both accept empty bodies but
-     * expect "{}" not "[]"). PHP arrays with no keys serialize to "[]" — wrap
-     * in stdClass so json_encode emits "{}". Keyed arrays pass through unchanged.
+     * empty (e.g. capture order accepts an empty body but expects "{}" not "[]").
+     * PHP arrays with no keys serialize to "[]" — wrap in stdClass so json_encode
+     * emits "{}". Keyed arrays pass through unchanged.
      */
     private static function jsonBody(array $body): array|\stdClass
     {
@@ -211,8 +134,8 @@ class PayPalApi
 
     // ─────────────────────────────────────────────────────────────────────
     //  Static vendor helpers (currency map + amount format + HATEOAS link).
-    //  Used by PayPalGateway (one-off + off-session vault auto-charge); the
-    //  vendor-specific rules live here so callers don't duplicate them.
+    //  Used by PayPalGateway (one-off checkout); the vendor-specific rules live
+    //  here so callers don't duplicate them.
     // ─────────────────────────────────────────────────────────────────────
 
     public const SUPPORTED_CURRENCIES = [

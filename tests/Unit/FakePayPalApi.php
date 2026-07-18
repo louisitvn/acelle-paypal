@@ -21,7 +21,6 @@ class FakePayPalApi extends PayPalApi
     public ?string $lastPath    = null;
     public array $lastBody      = [];
     public array $lastQuery     = [];
-    public array $lastHeaders   = [];
     public array $callHistory   = [];
     private array $responseQueue = [];
     private ?\Throwable $nextThrow = null;
@@ -46,27 +45,21 @@ class FakePayPalApi extends PayPalApi
 
     public function get(string $path, array $query = []): array
     {
-        return $this->capture('GET', $path, [], $query, []);
+        return $this->capture('GET', $path, [], $query);
     }
 
-    public function post(string $path, array $body, array $headers = []): array
+    public function post(string $path, array $body): array
     {
-        return $this->capture('POST', $path, $body, [], $headers);
+        return $this->capture('POST', $path, $body, []);
     }
 
-    public function patch(string $path, array $body): array
-    {
-        return $this->capture('PATCH', $path, $body, [], []);
-    }
-
-    private function capture(string $method, string $path, array $body, array $query, array $headers): array
+    private function capture(string $method, string $path, array $body, array $query): array
     {
         $this->lastMethod  = $method;
         $this->lastPath    = $path;
         $this->lastBody    = $body;
         $this->lastQuery   = $query;
-        $this->lastHeaders = $headers;
-        $this->callHistory[] = compact('method', 'path', 'body', 'query', 'headers');
+        $this->callHistory[] = compact('method', 'path', 'body', 'query');
 
         if ($this->nextThrow !== null) {
             $t = $this->nextThrow;

@@ -1,10 +1,10 @@
 <?php
 
 return [
-    // ── 'paypal' gateway (Orders v2 hosted checkout + app-driven auto-charge)
+    // ── 'paypal' gateway (Orders v2 hosted checkout — one-off only)
     'gateway' => [
         'name'        => 'PayPal',
-        'description' => 'Accept PayPal payments via hosted checkout. Customer can pay with their PayPal account OR as a guest with debit/credit card (no PayPal account required). Saved PayPal wallets can be auto-charged for renewals.',
+        'description' => 'Accept PayPal payments via hosted checkout. Customer can pay with their PayPal account OR as a guest with debit/credit card (no PayPal account required). One-off payments only — subscription renewals are paid by the customer each cycle.',
     ],
 
     'form' => [
