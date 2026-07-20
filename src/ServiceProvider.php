@@ -80,11 +80,12 @@ class ServiceProvider extends Base
         // directly. Replace icon.svg in the plugin root with your own to brand it.
         Hook::set('icon_url_acelle/paypal', fn () => route('plugin.acelle.paypal.icon'));
 
-        // This plugin ships ONE gateway type — 'paypal', one-off Orders v2.
-        // PayPal here is local-charge / one-off ONLY; it does NOT start
-        // provider-managed remote subscriptions.
+        // This plugin ships ONE 'paypal' gateway type — a MERGED driver that does BOTH a one-off
+        // Orders v2 hosted charge AND a provider-managed PayPal subscription (Subscriptions v1),
+        // branching on whether the PaymentIntent carries a subscription spec. Capability is read
+        // purely via `instanceof` on the resolved service (no registration flag).
 
-        // ── 'paypal' — direct one-off gateway (Orders v2)
+        // ── 'paypal' — one-off (Orders v2) + remote subscription (Subscriptions v1)
         Billing::register(
             type: 'paypal',
             name: trans('paypal::messages.gateway.name'),

@@ -10,16 +10,14 @@ use App\Model\PaymentIntent;
 use Illuminate\Http\Request;
 
 /**
- * One-off PayPal return URL — fires after customer approves (or cancels) at
- * PayPal hosted checkout. Two branches:
- *   - ?cancel=1            → onPaymentFailed("User cancelled at PayPal")
- *   - ?token={paypal_order_id} (or stamped on metadata)
- *                          → captureOrder, dispatch onPaymentSuccess /
- *                            onPaymentFailed based on capture status.
+ * PayPal return URL — fires after the buyer approves (or cancels) the hosted checkout. Branches:
+ *   - ?cancel=1                    → onPaymentFailed("User cancelled at PayPal")
+ *   - intent carries a subscription → reconcile the provider subscription (host polls
+ *                                     getCheckoutSession → onSubscriptionCreated once ACTIVE)
+ *   - one-off intent               → captureOrder, dispatch onPaymentSuccess / onPaymentFailed
  *
- * Idempotent — repeat hits skip via Invoice::isNew() guard inside
- * CheckoutHandler::onPaymentSuccess. Always redirects to merchant return_url
- * at the end so the customer lands somewhere coherent.
+ * Idempotent — repeat hits skip via Invoice::isNew() guard inside CheckoutHandler. Always redirects
+ * to the merchant return_url so the customer lands somewhere coherent.
  */
 class PayPalReturnController extends Controller
 {
@@ -47,13 +45,30 @@ class PayPalReturnController extends Controller
         $handler   = app(CheckoutHandlerInterface::class);
         $intentDto = $intent->toDto();
 
-        // ─── cancel branch
+        // ─── cancel branch (both lanes)
         if ($request->query('cancel')) {
-            \Log::info('PayPal one-off return: customer cancelled', ['intent_uid' => $intentUid]);
+            \Log::info('PayPal return: customer cancelled', ['intent_uid' => $intentUid]);
             $handler->onPaymentFailed($intentDto, trans('paypal::messages.checkout.cancelled'));
             return redirect()->away($merchantReturn);
         }
 
+        // ─── SUBSCRIPTION lane — the buyer approved a PayPal subscription. Reconcile THIS intent off
+        // its stamped subscription id: the host polls getCheckoutSession() and, once the subscription is
+        // ACTIVE, fires onSubscriptionCreated. Non-fatal — the cron poller is the durable backstop.
+        if ($intentDto->subscription !== null) {
+            try {
+                app(\App\Services\Subscription\SubscriptionManagementService::class)
+                    ->checkRemoteCheckoutIntent($intent);
+            } catch (\Throwable $e) {
+                \Log::warning('PayPal subscription return reconcile failed (non-fatal — the poller is the backstop)', [
+                    'intent_uid' => $intentUid,
+                    'error'      => $e->getMessage(),
+                ]);
+            }
+            return redirect()->away($merchantReturn);
+        }
+
+        // ─── ONE-OFF lane — capture the approved Order.
         $paypalOrderId = (string) ($request->query('token')
             ?: ($intent->metadata['paypal_order_id'] ?? ''));
         if ($paypalOrderId === '') {

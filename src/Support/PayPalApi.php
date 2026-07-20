@@ -6,7 +6,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\BadResponseException;
 
 /**
- * Thin wrapper around PayPal REST API (Orders v2 + OAuth).
+ * Thin wrapper around PayPal REST API (Orders v2 one-off + Subscriptions v1 / Billing Plans + OAuth).
  *
  * Auth model: client-credentials OAuth. We hit POST /v1/oauth2/token with
  * Basic auth (client_id:client_secret), receive a Bearer access_token valid
