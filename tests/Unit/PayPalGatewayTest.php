@@ -170,15 +170,24 @@ class PayPalGatewayTest extends TestCase
             'subscriber'   => ['payer_id' => 'PX'],
             'billing_info' => [
                 'next_billing_time' => '2026-09-01T00:00:00Z',
-                'last_payment'      => ['amount' => ['value' => '10.00', 'currency_code' => 'USD'], 'status' => 'COMPLETED', 'time' => '2026-08-01T00:00:00Z'],
+                // VERBATIM shape of PayPal Subscriptions v1 `last_payment` — {amount, time} and nothing
+                // else. Captured live from an ACTIVE sub that had just collected $10. This fake once
+                // carried a 'status' => 'COMPLETED' key that PayPal never sends (that is the Orders v2
+                // CAPTURE vocabulary), which taught the mapper to read a field that does not exist and
+                // hid the bug behind a green test. Do not add keys the vendor does not return.
+                'last_payment'      => ['amount' => ['value' => '10.00', 'currency_code' => 'USD'], 'time' => '2026-08-01T00:00:00Z'],
             ],
         ]);
         $dto = $this->makeGateway($fake)->getRemoteSubscription('I-9');
         $this->assertSame('active', $dto->status);
         $this->assertSame('P-9', $dto->remotePlanId);
         $this->assertSame(10.0, $dto->latestInvoiceAmount);
-        $this->assertSame('paid', $dto->latestInvoiceStatus);
         $this->assertTrue($dto->isActive());
+
+        // PayPal states no status for the last payment, so the DTO must say so rather than infer a
+        // cheerful 'paid' — the admin badge simply does not render. Per-transaction status is
+        // available authoritatively via getRemoteInvoices().
+        $this->assertNull($dto->latestInvoiceStatus);
     }
 
     public function test_get_remote_subscriptions_is_empty_no_list_endpoint(): void
@@ -217,4 +226,47 @@ class PayPalGatewayTest extends TestCase
         $this->assertSame(1, $plan->intervalCount);
         $this->assertSame(14, $plan->trialDays);
     }
+
+    // ── 5. Capabilities PayPal must NOT claim ────────────────────────────
+
+    /**
+     * Publishing a catalog does not imply being able to MOVE a subscription inside it. PayPal's revise
+     * cannot switch a plan AND collect the difference in one call — a PayPal-funded sub keeps billing
+     * the old plan unless the subscriber re-consents, and a card-funded one only changes price at the
+     * next cycle. So the gateway declines the capability and the host refuses the plan change up front,
+     * rather than the gateway faking a switch that did not happen.
+     */
+    public function test_does_not_claim_the_plan_change_capability(): void
+    {
+        $gw = $this->makeGateway(new FakePayPalApi());
+
+        $this->assertNotInstanceOf(\App\Cashier\Contracts\SupportsRemotePlanChange::class, $gw);
+        $this->assertInstanceOf(\App\Cashier\Contracts\SupportsRemoteCatalogInterface::class, $gw);
+    }
+
+    // ── 6. Catalog surface PayPal cannot back — must fail loud, not fake it ──
+
+    /**
+     * Each of these is a question PayPal's API cannot answer. A null/empty "degraded" answer would be
+     * indistinguishable from a real one (e.g. null failure = "nothing wrong"), so the gateway refuses.
+     */
+    public function test_unsupported_catalog_operations_throw_instead_of_degrading(): void
+    {
+        $gw = $this->makeGateway(new FakePayPalApi());
+
+        foreach ([
+            'getRemoteInvoiceFailure'          => fn () => $gw->getRemoteInvoiceFailure('TXN-1'),
+            'getCardUpdateUrl'                 => fn () => $gw->getCardUpdateUrl('PAYER-1', 'https://a/r', 'https://a/c'),
+            'resolveStoredPaymentMethod'       => fn () => $gw->resolveStoredPaymentMethod('sess-1'),
+            'setRemoteSubscriptionPaymentMethod' => fn () => $gw->setRemoteSubscriptionPaymentMethod('I-9', 'PM-1'),
+        ] as $name => $call) {
+            try {
+                $call();
+                $this->fail("{$name}() must throw — PayPal cannot support it.");
+            } catch (\LogicException $e) {
+                $this->assertStringContainsString('PayPal', $e->getMessage(), "{$name}() must say why");
+            }
+        }
+    }
+
 }

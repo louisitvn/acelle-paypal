@@ -15,7 +15,7 @@ use App\Cashier\DTO\PaymentMethodDTO;
 use App\Cashier\DTO\PollableCheckout;
 use App\Cashier\DTO\RemoteCheckoutSessionDTO;
 use App\Cashier\DTO\RemoteInvoiceDTO;
-use App\Cashier\DTO\RemotePlanChangePreviewDTO;
+use App\Cashier\DTO\RemotePaymentFailureDTO;
 use App\Cashier\DTO\RemotePlanDTO;
 use App\Cashier\DTO\RemoteSubscriptionDTO;
 use Carbon\Carbon;
@@ -36,16 +36,31 @@ use Carbon\Carbon;
  *   - IntentGatewayInterface        — the base (one-off + subscription checkout)
  *   - SupportsRemoteHostedCheckout  — poll the subscription session to completion
  *   - ManageRemoteSubscriptionInterface — read/cancel/resume a subscription + read its card
- *   - SupportsRemoteCatalogInterface    — PayPal Billing Plans catalog + plan change + invoice history
+ *   - SupportsRemoteCatalogInterface    — PayPal Billing Plans catalog + invoice history
  *
- * PayPal API gaps honestly handled (PayPal Subscriptions v1 has no equivalent):
+ * DELIBERATELY NOT declared — {@see \App\Cashier\Contracts\SupportsRemotePlanChange}. PayPal's
+ * `revise` is not a merchant-side plan switch: a PayPal-funded subscription needs the SUBSCRIBER to
+ * log in and re-consent, and "If re-consent is not done or if it fails, the subscription continues to
+ * be billed on the existing plan"; a card-funded one does flip, but bills nothing now because
+ * "Proration and one-time fees aren't automatically supported" and "The new price is effective
+ * starting on the next billing cycle". Either way the app cannot switch a plan and collect the
+ * difference in one call, so it declines the capability rather than faking it — the host then refuses
+ * the plan change up front and tells the customer to cancel and resubscribe. Having the CATALOG does
+ * not imply being able to MOVE a subscription inside it; that is precisely why the two interfaces are
+ * separate.
+ *
+ * PayPal API gaps honestly handled (PayPal Subscriptions v1 has no equivalent). Each is either a
+ * documented degrade or a named REFUSAL — never a fake success, because a fake here is money:
  *   - No "list all subscriptions" endpoint → {@see getRemoteSubscriptions} returns empty (the admin
  *     remote-subscriptions overview shows nothing; the per-sub sync + everything else works, since the
  *     host syncs by id via {@see getRemoteSubscription}).
- *   - No proration PREVIEW (revise applies immediately) → {@see previewPlanChange} returns the new
- *     plan's recurring price as a best-effort quote, not a per-second prorated amount.
  *   - No single sub-transaction retrieve → {@see getRemoteInvoice} returns null (caller falls back to
- *     the {@see getRemoteInvoices} list on the next sync).
+ *     the {@see getRemoteInvoices} list on the next sync). No per-transaction failure object AT ALL →
+ *     {@see getRemoteInvoiceFailure} REFUSES rather than claim there is nothing to explain.
+ *   - No merchant-hosted card-replacement page, no by-id stored-card lookup, no API to repoint a live
+ *     subscription's funding source → {@see getCardUpdateUrl}, {@see resolveStoredPaymentMethod} and
+ *     {@see setRemoteSubscriptionPaymentMethod} REFUSE. The subscriber changes the funding source in
+ *     their own PayPal account (Settings → Payments → Automatic payments).
  *   - Cancel is IMMEDIATE + terminal (no cancel-at-period-end) → {@see cancelRemoteSubscription} ends
  *     the subscription now.
  *
@@ -54,6 +69,7 @@ use Carbon\Carbon;
  *
  * @link https://developer.paypal.com/docs/api/orders/v2/
  * @link https://developer.paypal.com/docs/api/subscriptions/v1/
+ * @link https://developer.paypal.com/docs/subscriptions/customize/revise-subscriptions/
  */
 class PayPalGateway implements
     IntentGatewayInterface,
@@ -191,18 +207,6 @@ class PayPalGateway implements
     }
 
     /**
-     * PayPal Subscriptions v1 has NO "list all subscriptions" endpoint (you track ids yourself), so the
-     * admin remote-subscriptions overview is empty. The per-subscription sync + everything else works —
-     * the host reconciles by id via {@see getRemoteSubscription}, not this list.
-     *
-     * @return array{data: RemoteSubscriptionDTO[], has_more: bool, next_cursor: ?string}
-     */
-    public function getRemoteSubscriptions(?string $startingAfter = null, int $limit = 100): array
-    {
-        return ['data' => [], 'has_more' => false, 'next_cursor' => null];
-    }
-
-    /**
      * Cancel the subscription. NOTE: PayPal has no cancel-at-period-end — this ends the subscription
      * IMMEDIATELY (terminal). The buyer loses access now, not at the next billing date.
      */
@@ -277,8 +281,15 @@ class PayPalGateway implements
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    //  SupportsRemoteCatalogInterface — plans + plan change + invoice history
+    //  SupportsRemoteCatalogInterface — plan catalog, subscription listing,
+    //  invoice history, card replacement.
+    //  Ordered + sub-bannered to MIRROR the interface, so a reviewer can diff this
+    //  section against the contract top-to-bottom. (This class went uninstantiable
+    //  once already because the contract grew and nobody noticed — see the
+    //  contract-drift guard in PayPalGatewayTest.)
     // ──────────────────────────────────────────────────────────────────────
+
+    // ── Plan catalog ──────────────────────────────────────────────────────
 
     /**
      * @return RemotePlanDTO[]
@@ -305,40 +316,21 @@ class PayPalGateway implements
         return $this->planToDto($this->api->get("/v1/billing/plans/{$remotePlanId}"));
     }
 
-    /**
-     * Switch the subscription to a new plan (PayPal revise). PayPal applies its own proration on the
-     * next cycle; there is no host-controlled charge-immediately / proration-date pinning, so those
-     * arguments are accepted for the interface but not honoured (PayPal has no equivalent knob).
-     */
-    public function updateRemoteSubscriptionPlan(
-        string $remoteSubscriptionId,
-        string $newRemotePlanId,
-        bool $chargeImmediately = false,
-        ?int $prorationDate = null
-    ): RemoteSubscriptionDTO {
-        $this->api->post("/v1/billing/subscriptions/{$remoteSubscriptionId}/revise", [
-            'plan_id' => $newRemotePlanId,
-        ]);
-        return $this->getRemoteSubscription($remoteSubscriptionId);
-    }
+    // ── Subscription listing ──────────────────────────────────────────────
 
     /**
-     * Best-effort plan-change quote. PayPal Subscriptions v1 has NO proration-preview endpoint (revise
-     * applies immediately), so this returns the NEW plan's recurring price — an indicative amount, not a
-     * per-second prorated charge. The confirm UI should present it as "new price", not "charged now".
+     * PayPal Subscriptions v1 has NO "list all subscriptions" endpoint (you track ids yourself), so the
+     * admin remote-subscriptions overview is empty. The per-subscription sync + everything else works —
+     * the host reconciles by id via {@see getRemoteSubscription}, not this list.
+     *
+     * @return array{data: RemoteSubscriptionDTO[], has_more: bool, next_cursor: ?string}
      */
-    public function previewPlanChange(
-        string $remoteSubscriptionId,
-        string $newRemotePlanId,
-        ?int $prorationDate = null
-    ): RemotePlanChangePreviewDTO {
-        $plan = $this->getRemotePlan($newRemotePlanId);
-        return new RemotePlanChangePreviewDTO(
-            amount:        $plan->price,
-            currency:      $plan->currency,
-            prorationDate: $prorationDate ?? time(),
-        );
+    public function getRemoteSubscriptions(?string $startingAfter = null, int $limit = 100): array
+    {
+        return ['data' => [], 'has_more' => false, 'next_cursor' => null];
     }
+
+    // ── Invoice history ───────────────────────────────────────────────────
 
     /**
      * List a subscription's billing transactions, oldest-first. PayPal requires a time window on the
@@ -387,6 +379,74 @@ class PayPalGateway implements
     public function getRemoteInvoice(string $invoiceId): ?RemoteInvoiceDTO
     {
         return null;
+    }
+
+    /**
+     * PayPal exposes no failure object addressable by a TRANSACTION id. The nearest signal,
+     * `billing_info.last_failed_payment` (+ `failed_payments_count`), hangs off the SUBSCRIPTION and
+     * describes "the last failure on this sub", not "why invoice X failed" — it cannot answer this
+     * question, and there is no by-id retrieve to hang it on ({@see getRemoteInvoice} is null for the
+     * same reason).
+     *
+     * Returning null would be a WRONG answer, not a degraded one: null is the contract's way of saying
+     * "this invoice has no failed attempt to explain", which routes recovery down the keep-the-card /
+     * 3-D-Secure path. "I cannot know" must not be dressed up as "nothing is wrong".
+     *
+     * Structurally unreachable today: the only caller reaches this after {@see getRemoteInvoice}
+     * returned a DTO, so the PayPal lane bails out one step earlier. A throw here is therefore the
+     * loud tripwire for a future caller that stops depending on that, not a live failure mode.
+     */
+    public function getRemoteInvoiceFailure(string $invoiceId): ?RemotePaymentFailureDTO
+    {
+        throw new \LogicException(
+            'PayPal cannot explain a failed subscription charge by invoice id — Subscriptions v1 has no '
+            . "per-transaction failure object (invoice id: {$invoiceId})."
+        );
+    }
+
+    // ── Card replacement ──────────────────────────────────────────────────
+
+    /**
+     * PayPal has no hosted card-update page keyed by a customer. `$remoteCustomerId` here is a PayPal
+     * `payer_id`, which identifies a PayPal ACCOUNT, not a merchant-side vault of stored cards — there
+     * is no session to create against it. Changing the funding instrument on a PayPal subscription goes
+     * through a subscriber-approved `revise` on that SUBSCRIPTION (an id this signature does not carry),
+     * or the buyer's own PayPal account settings, which the merchant cannot drive.
+     *
+     * No host call site today. Throws so that wiring one up fails immediately and visibly rather than
+     * handing a buyer a broken link.
+     */
+    public function getCardUpdateUrl(string $remoteCustomerId, string $returnUrl, string $cancelUrl): string
+    {
+        throw new \LogicException(
+            'PayPal has no hosted card-update page for a payer — a funding-source change requires a '
+            . 'subscriber-approved revise on the subscription itself.'
+        );
+    }
+
+    /**
+     * Paired with {@see getCardUpdateUrl} — with no such session to complete, there is no reference to
+     * resolve. Null would claim "the session did not complete"; the truth is that no session can exist.
+     */
+    public function resolveStoredPaymentMethod(string $sessionReference): ?string
+    {
+        throw new \LogicException(
+            'PayPal has no card-update session to resolve — getCardUpdateUrl() is unsupported on this gateway.'
+        );
+    }
+
+    /**
+     * PayPal Subscriptions v1 has no "make this stored instrument the default" write. The funding
+     * source is chosen by the subscriber during approval and can only be changed by another
+     * subscriber-approved revise; the merchant holds no reusable payment-method id to assign (which is
+     * also why this gateway does not declare SupportsAutoChargeInterface — PayPal charges the sub).
+     */
+    public function setRemoteSubscriptionPaymentMethod(string $remoteSubscriptionId, string $remotePaymentMethodId): void
+    {
+        throw new \LogicException(
+            'PayPal cannot be told which stored instrument to charge — the subscriber owns that choice '
+            . 'and changes it only by approving a revise.'
+        );
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -460,13 +520,19 @@ class PayPalGateway implements
         $lastPayment = $billing['last_payment'] ?? null;
         $ppStatus    = (string) ($sub['status'] ?? '');
 
-        $latestAmount = null;
-        $latestStatus = null;
-        if (is_array($lastPayment)) {
-            $latestAmount = isset($lastPayment['amount']['value']) ? (float) $lastPayment['amount']['value'] : null;
-            $rawPayStatus = strtolower((string) ($lastPayment['status'] ?? ''));
-            $latestStatus = $rawPayStatus === 'completed' ? 'paid' : ($rawPayStatus ?: null);
-        }
+        // `billing_info.last_payment` is {amount, time} — PayPal states NO status here. (Verified live
+        // against an ACTIVE sub that had just collected $10: the key is simply absent.) An earlier
+        // version read $lastPayment['status'] and mapped 'completed' → 'paid'; that is the Orders v2
+        // CAPTURE vocabulary — the wrong API — so the branch never once fired. It is gone rather than
+        // left as a comforting no-op.
+        //
+        // latestInvoiceStatus therefore stays null: "PayPal did not say", which is the truth. Do NOT
+        // infer 'paid' from the mere presence of last_payment without first confirming on a FAILED
+        // sandbox charge that PayPal leaves it untouched (it has a separate last_failed_payment +
+        // failed_payments_count, which suggests it does — but suggests is not verified, and guessing
+        // would badge a refused charge as paid in the admin UI). The authoritative status is already
+        // available per transaction via getRemoteInvoices(); use that if the badge is ever needed.
+        $latestAmount = isset($lastPayment['amount']['value']) ? (float) $lastPayment['amount']['value'] : null;
 
         return new RemoteSubscriptionDTO(
             id:                  (string) ($sub['id'] ?? ''),
@@ -479,7 +545,7 @@ class PayPalGateway implements
             canceledAt:          in_array($ppStatus, ['CANCELLED', 'EXPIRED'], true) && isset($sub['status_update_time'])
                                     ? Carbon::parse((string) $sub['status_update_time']) : null,
             latestInvoiceAmount: $latestAmount,
-            latestInvoiceStatus: $latestStatus,
+            latestInvoiceStatus: null,   // PayPal states none — see above
             latestInvoiceId:     null,
             metadata:            ['paypal_subscription' => $sub],
         );

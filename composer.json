@@ -1,7 +1,7 @@
 {
     "name": "acelle/paypal",
     "title": "PayPal Payment Gateway",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "app_version": "4.0.24",
     "description": "Accept PayPal payments — one-off Orders v2 hosted checkout AND provider-managed subscriptions (Subscriptions v1). Pay with a PayPal account or a guest card; map local plans to PayPal Billing Plans for hands-off recurring billing. Pull-only completion (no webhook).",
     "autoload": {
