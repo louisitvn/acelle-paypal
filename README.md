@@ -9,6 +9,10 @@ This is a **PayPal plugin for [Acelle Mail](https://acellesend.com) — a self-h
 
 It is **free**, and it is a drop-in: upload the ZIP, enable it, paste a Client ID and Secret. No core files are patched, and nothing else in your installation changes.
 
+[![The PayPal payment gateway plugin in the Acelle Mail dashboard, listed with other payment gateways for self-hosted email marketing](https://acelle2026.s3.dualstack.us-east-1.amazonaws.com/acellesend-dashboard-plugins-pay.png)](https://acellesend.com/integrations)
+
+<sub>PayPal alongside the other payment gateways in an Acelle Mail installation's plugin catalog — install it from there, or upload the ZIP by hand.</sub>
+
 ---
 
 ## Table of contents
