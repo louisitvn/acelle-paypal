@@ -2,8 +2,6 @@
 
 [![Plugin version](https://img.shields.io/badge/version-1.3.2-blue)](https://github.com/louisitvn/acelle-paypal/releases)
 [![Acelle Mail](https://img.shields.io/badge/Acelle%20Mail-4.0.24%2B-2563eb)](https://acellesend.com)
-[![PHP](https://img.shields.io/badge/PHP-8.1%2B-777bb4)](https://www.php.net/)
-[![PayPal API](https://img.shields.io/badge/PayPal-Orders%20v2%20%2B%20Subscriptions%20v1-003087)](https://developer.paypal.com/)
 
 This is a **PayPal plugin for [Acelle Mail](https://acellesend.com) — a self-hosted email marketing platform** you install on your own hosting server. The plugin lets an Acelle administrator charge customers through PayPal, both for one-time purchases and for recurring subscriptions when Acelle is run as a **SaaS** business.
 
@@ -12,8 +10,6 @@ It is **free**, and it is a drop-in: upload the ZIP, enable it, paste a Client I
 [![The PayPal payment gateway plugin in the Acelle Mail dashboard, listed with other payment gateways for self-hosted email marketing](https://acelle2026.s3.dualstack.us-east-1.amazonaws.com/acellesend-dashboard-plugins-pay.png)](https://acellesend.com/integrations)
 
 <sub>PayPal alongside the other payment gateways in an Acelle Mail installation's plugin catalog — install it from there, or upload the ZIP by hand.</sub>
-
----
 
 ## About Acelle Mail
 
@@ -24,8 +20,6 @@ Because it is self-hosted, you choose how mail actually leaves the building. Ace
 The **Extended License** goes a step further: it ships a complete **multi-tenant SaaS framework**, so you can run Acelle as your own email marketing service — customer signup, plans, quotas, invoices and subscription billing — and sell to your own users. **That is where this plugin comes in:** it is one of the payment gateways that collects the money.
 
 Learn more: [features](https://acellesend.com/features) · [integrations](https://acellesend.com/integrations) · [pricing](https://acellesend.com/pricing) · [live demo](https://acellesend.com/demo) · [knowledge base](https://acellesend.com/kb)
-
----
 
 ## What this plugin does
 
@@ -46,8 +40,6 @@ Also included:
 - **Sandbox mode** — a full dress rehearsal before you take real money.
 - **One gateway, not two** — you register PayPal once; it serves both one-off invoices and recurring plans.
 
----
-
 ## Requirements
 
 | | Minimum |
@@ -61,8 +53,6 @@ Also included:
 | **Inbound HTTPS** | Your Acelle installation must be reachable so buyers can be redirected back from PayPal. |
 
 You do **not** need a public webhook endpoint, and you do **not** need IPN.
-
----
 
 ## Installation
 
@@ -88,8 +78,6 @@ Then upload `paypal-1.3.2.zip` through **System → Plugins** exactly as above.
 
 If your installation is connected to the Acelle plugin marketplace, open **Plugins → Install plugin → Connect** and install PayPal from the catalog — no manual download.
 
----
-
 ## Configuration
 
 1. Go to **Plans & Billing → Payment Gateways** and click **+ Add Gateway**.
@@ -107,8 +95,6 @@ If your installation is connected to the Acelle plugin marketplace, open **Plugi
 
 > **Sandbox and live use different credentials.** A live Client ID will not work against the sandbox API, and vice versa — switching environment means switching both values.
 
----
-
 ## Selling subscriptions: mapping PayPal Billing Plans
 
 For recurring billing, PayPal is the merchant of record for the schedule, so each local plan must exist at PayPal as a **Billing Plan**:
@@ -119,16 +105,12 @@ For recurring billing, PayPal is the merchant of record for the schedule, so eac
 
 One-off invoices need none of this — they bill the invoice amount directly.
 
----
-
 ## What your customers see
 
 1. The customer picks a plan or opens an invoice in your Acelle installation and chooses **PayPal**.
 2. They are sent to PayPal's own hosted page — your gateway credentials never reach the browser, and card details never touch your server.
 3. They pay with a PayPal balance, a linked bank account, or **a debit/credit card as a guest**.
 4. PayPal returns them to your site, the payment is confirmed, and the invoice is marked paid or the subscription is activated.
-
----
 
 ## No webhook required
 
@@ -141,8 +123,6 @@ Completion is **pull-based**: when the buyer returns from PayPal, your installat
 - no silent breakage when a callback URL changes,
 - and it works on installations that sit behind a VPN, a staging gate or basic auth.
 
----
-
 ## Testing with the PayPal sandbox
 
 1. Set **Environment** to `sandbox` and paste your sandbox Client ID and Secret.
@@ -150,8 +130,6 @@ Completion is **pull-based**: when the buyer returns from PayPal, your installat
 3. Run a full purchase end to end — one-off *and*, if you sell recurring, a subscription against a sandbox Billing Plan.
 4. Confirm the invoice is marked paid and the subscription appears active in Acelle.
 5. Switch to `live` credentials only once both paths pass.
-
----
 
 ## Troubleshooting
 
@@ -165,13 +143,9 @@ Completion is **pull-based**: when the buyer returns from PayPal, your installat
 
 A full illustrated walkthrough — every screen, every field — ships with the plugin in [`guideline/index.md`](guideline/index.md).
 
----
-
 ## Uninstalling
 
 **Disable** removes PayPal from the gateway picker but keeps its configuration, so you can turn it back on later. **Delete** rolls back the plugin's migrations and removes its files. Existing paid invoices are historical records and are never touched.
-
----
 
 ## Other payment gateways for Acelle
 
@@ -179,16 +153,12 @@ The same drop-in pattern is available for many providers, so you can bill custom
 
 Browse them from the Plugins page of your account, or see [all integrations](https://acellesend.com/integrations).
 
----
-
 ## Support
 
 - **Documentation & knowledge base** — <https://acellesend.com/kb>
 - **Blog and guides** — <https://acellesend.com/blog>
 - **Contact** — <https://acellesend.com/contact> or support@acellemail.com
 - **Bugs in this plugin** — open an issue on this repository.
-
----
 
 ## License
 
