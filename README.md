@@ -15,25 +15,6 @@ It is **free**, and it is a drop-in: upload the ZIP, enable it, paste a Client I
 
 ---
 
-## Table of contents
-
-- [About Acelle Mail](#about-acelle-mail)
-- [What this plugin does](#what-this-plugin-does)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Selling subscriptions: mapping PayPal Billing Plans](#selling-subscriptions-mapping-paypal-billing-plans)
-- [What your customers see](#what-your-customers-see)
-- [No webhook required](#no-webhook-required)
-- [Testing with the PayPal sandbox](#testing-with-the-paypal-sandbox)
-- [Troubleshooting](#troubleshooting)
-- [Uninstalling](#uninstalling)
-- [Other payment gateways for Acelle](#other-payment-gateways-for-acelle)
-- [Support](#support)
-- [License](#license)
-
----
-
 ## About Acelle Mail
 
 [Acelle Mail](https://acellesend.com) is **self-hosted email marketing software**: a complete campaign platform — lists, segmentation, automation, templates, tracking and reporting — that runs on **your own hosting server**, under your own domain, with the full source code included. There is no per-subscriber pricing and no monthly platform fee; the licence is a **one-time purchase**.
