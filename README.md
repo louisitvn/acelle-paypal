@@ -56,27 +56,35 @@ You do **not** need a public webhook endpoint, and you do **not** need IPN.
 
 ## Installation
 
-### From your Acelle dashboard (recommended)
+Two ways. The first needs no files at all.
 
-1. Download the plugin ZIP.
-2. In your Acelle admin, open **System → Plugins**.
-3. Click **Install plugin**, drop in the ZIP, then **Upload & install**.
-4. Find **PayPal Payment Gateway** in the list, open the **⋮** menu and choose **Enable**.
+### Through Acelle, from the marketplace (recommended)
 
-### From source
+Your installation fetches the plugin itself — nothing to download, nothing to upload.
 
-```bash
-git clone https://github.com/louisitvn/acelle-paypal.git
-cd acelle-paypal
-git checkout 1.3.2          # always build from a tag
-./build.sh /tmp/out         # → /tmp/out/paypal-1.3.2.zip
-```
+1. In your Acelle admin, open **Plugins**.
+2. Click **Install plugin** and choose **Connect with marketplace**.
+3. Approve the connection once, then install **PayPal Payment Gateway** from the catalog.
 
-Then upload `paypal-1.3.2.zip` through **System → Plugins** exactly as above.
+[![Installing a plugin in Acelle Mail by connecting to the marketplace, with PayPal Payment Gateway among the installed plugins](https://acelle2026.s3.dualstack.us-east-1.amazonaws.com/plugin-install-from-marketplace.png)](https://acellesend.com/integrations)
 
-### From the in-app marketplace
+<sub>**Plugins → Install plugin → Connect with marketplace.** Your account's plugins are listed for you; installed ones show their version and package name, like `v1.3.2 · acelle/paypal` above.</sub>
 
-If your installation is connected to the Acelle plugin marketplace, open **Plugins → Install plugin → Connect** and install PayPal from the catalog — no manual download.
+When a new version is published it shows up in the same place, so upgrading is the same three clicks.
+
+### Manually
+
+1. Download the ZIP — from the **Plugins** page of your account, or build it from source:
+
+   ```bash
+   git clone https://github.com/louisitvn/acelle-paypal.git
+   cd acelle-paypal
+   git checkout 1.3.2          # always build from a tag
+   ./build.sh /tmp/out         # → /tmp/out/paypal-1.3.2.zip
+   ```
+
+2. In your Acelle admin, open **Plugins → Install plugin → Upload plugin package** and drop the ZIP in.
+3. Find **PayPal Payment Gateway** in the list, open the **⋮** menu and choose **Enable**.
 
 ## Configuration
 
